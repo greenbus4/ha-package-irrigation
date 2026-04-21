@@ -1,0 +1,227 @@
+
+
+# ======= Helpers ========
+
+
+input_boolean:
+
+  sprinkler_select_enable_debug:
+    name: Enable Select Debugging
+    initial: off
+
+input_number:
+
+  # This displays the number loaded from the config
+  # and can be modified
+  sprinkler_valve_minutes:
+    name: Valve Minutes
+    min: 0
+    max: 200
+    mode: box
+    icon: mdi:timer-outline
+
+  sprinkler_valve_percent_runtime:
+    name: Percent Runtime
+    min: 0
+    max: 200
+    unit_of_measurement: '%'
+    icon: mdi:percent
+
+
+input_text:
+
+  # These are the source (and maintain state) for the template selects.
+  sprinkler_program:
+    name: Program
+
+  sprinkler_valve:
+    name: Valve
+
+  # Used for the text of the default input value
+  # Can't dynamically set with "initial"
+  sprinkler_select_default_text:
+    name: Default Select Text
+    initial: 'Pick...'
+
+
+#------------- Automation -----------
+automation:
+
+  # This automation updates the input_number.sprinkler_valve_minutes based
+  # on the source input_text.
+  # Why did I move away from having the value of the secondary set this?
+  # And why isn't the percent a template?
+  - id: sprinkler_update_minutes
+    alias: Sprinkler Update Minutes
+    triggers:
+      - trigger: state
+        entity_id:
+          - input_text.sprinkler_program
+          - input_text.sprinkler_valve
+          - input_number.sprinkler_valve_percent_runtime
+        not_to: unknown
+    actions:
+      - variables:
+          default: "{{ states('input_text.sprinkler_select_default_text') }}"
+          p: "{{ states('input_text.sprinkler_program') }}"
+          s: "{{states('input_text.sprinkler_valve') }}"
+          c: "{{ state_attr('sensor.sprinkler_config','programs') }}"
+          val: |-
+            {{  0
+              if
+                p in [default, 'unknown'] or
+                s in [default, 'unknown'] or
+                p not in c or
+                s not in c[p]
+              else
+                c[p][s][1]
+            }}
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sprinkler_valve_minutes
+        data:
+          value: "{{ (val|int * states('input_number.sprinkler_valve_percent_runtime')|int/100)|int }}"
+      - if:
+          - condition: template
+            value_template: "{{ trigger.entity_id == 'input_number.sprinkler_valve_percent_runtime' }}"
+        then:
+          - action: script.sprinkler_log_message
+            data:
+              message: "Percent updated to: {{ states('input_number.sprinkler_valve_percent_runtime')|int }}%"
+              user: |-
+                {{
+                  states.person
+                  | selectattr( "attributes.user_id", "==", trigger.to_state.context.user_id)
+                  | map(attribute="attributes.friendly_name")
+                  | first
+                  | default('Reload')
+                }}
+
+template:
+
+
+  # --------------- Program Select -------------------
+  # Trigger when config changes to update possible options
+  - triggers:
+      - trigger: state
+        entity_id: sensor.sprinkler_config
+        not_to: unavailable
+        id: config_changed
+
+      # Fix: need to check if prorgams exist -- fails when first adding to HA
+      - trigger: homeassistant
+        event: start
+
+      - trigger: state
+        entity_id: input_text.sprinkler_program
+
+    actions:
+
+      - if:
+          - condition: trigger
+            id: config_changed
+        then:
+
+          # The current state may not be a valid now option, so reset to common value
+          - action: input_text.set_value
+            target:
+              entity_id:
+                - input_text.sprinkler_program
+            data:
+              value: "{{ states('input_text.sprinkler_select_default_text') }}"
+
+          # This may not be a state change so reset the number
+          - action: input_number.set_value
+            alias: But when would this happen
+            enabled: false
+            target:
+              entity_id: input_number.sprinkler_valve_minutes
+            data:
+              value: 0
+
+
+
+    select:
+      - name: Sprinkler program
+        unique_id: select_sprinkler_program_id
+        icon: mdi:format-list-group
+        optimistic: true
+        variables:
+          default: "{{ [ states('input_text.sprinkler_select_default_text') ] }}"
+          programs: "{{ state_attr('sensor.sprinkler_config','programs').keys()|list }}"
+
+        state: "{{ states('input_text.sprinkler_program') }}"
+        options: "{{ default + programs }}"
+        select_option:
+          - action: input_text.set_value
+            target:
+              entity_id: input_text.sprinkler_program
+            data:
+              value: "{{ option }}"
+
+  # ----------- Valve Select --------------
+  - triggers:
+      - trigger: state
+        entity_id: select.sprinkler_program
+        not_to: unavailable
+        id: program_changed
+
+
+      - trigger: homeassistant
+        event: start
+
+      # Allow updates to the input_text to reflect in the selects
+      - trigger: state
+        entity_id: input_text.sprinkler_valve
+
+
+
+    actions:
+      - if:
+          - condition: trigger
+            id: program_changed
+        then:
+          # The current state may not be a valid now option, so reset to common value
+          - action: input_text.set_value
+            target:
+              entity_id:
+                - input_text.sprinkler_valve
+            data:
+              value: "{{ states('input_text.sprinkler_select_default_text') }}"
+
+          # Reset the number
+          - action: input_number.set_value
+            alias: When does this happen
+            enabled: false
+            target:
+              entity_id: input_number.sprinkler_valve_minutes
+            data:
+              value: 0
+
+    select:
+      - name: Sprinkler valve
+        icon: mdi:valve
+        unique_id: sprinkler_valve_id
+        # Why was 'optimistic: true'? 
+        # It shouldn't be needed because when the select is modified in the UI
+        # the "select_option" below runs an that updates 'input_text.sprinkler_valve'
+        # which is one of the triggers, and then that would cause "state" to be processed below.
+        optimistic: false
+        variables:
+          default: "{{ states('input_text.sprinkler_select_default_text') }}"
+          cur_program: "{{ states('input_text.sprinkler_program') }}"
+          cur_valve: "{{ states('input_text.sprinkler_valve') }}"
+          programs: "{{ state_attr('sensor.sprinkler_config','programs') }}"
+
+        options: "{{ [default] + programs[cur_program].keys()|list if cur_program in programs else [default] }}"
+        state: "{{ cur_valve }}"
+        availability: "{{ not is_state('input_text.sprinkler_program', default ) }}"
+        select_option:
+          - action: input_text.set_value
+            target:
+              entity_id: input_text.sprinkler_valve
+            data:
+              value: "{{ option }}"
+
+
+

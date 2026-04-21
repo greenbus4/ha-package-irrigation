@@ -1,0 +1,144 @@
+#
+# This is mostly for loading the configuration from the YAML
+# that is returned from a script (script.sprinkler_configuration)
+# That is separate so that it's "easy" to change from the HA Scripts UI.
+#
+# Entities:
+#
+#   input_button.sprinkler_reload_config
+#     Button to trigger loading the raw YAML  config and save it in a sensor attribute.
+#
+#
+#   sensor.sprinkler_load_config
+#     This trigger-based sensor is triggered when the button is pressed and it
+#     calls script.sprinkler_load_config to load read the raw YAML and process it into
+#     what is used to run the various programs.
+#     It has two attributes: "progs" which is a hash of hashes of the valid valves
+#     and "bad" that stores error messages found when processing the config (e.g. bad entity id)
+#
+#
+#   sensor.sprinkler_config_issue
+#     Just a sensor to display any issues loading the configuration
+#
+#
+#   script.sprinkler_load_config
+#     Helper script that load the raw configuration YAML (script.sprinkler_configuration)
+#     and organizes it and returns it. The above sensor.sprinkler_log_config calls it.
+#     Doesnt't really need to be separate but wanted a way to run it and see the response data.
+#
+
+
+# ======= Helpers ========
+
+input_button:
+
+  # Button to refresh the template sensor that holds the configuration
+  sprinkler_reload_config_button:
+    name: Sprinkler Reload Configuration
+
+template:
+
+
+  # ---------- Configuration sensor -------------------
+  - triggers:
+      - trigger: state
+        entity_id: input_button.sprinkler_reload_config_button
+
+    actions:
+      - action: script.sprinkler_load_config
+        response_variable: config
+
+      - action: script.sprinkler_log_message
+        data:
+          message: Reloaded Config
+          user: |-
+            {{
+              states.person 
+              | selectattr( "attributes.user_id", "==", trigger.to_state.context.user_id)
+              | map(attribute="attributes.friendly_name")
+              | first
+            }}
+
+    sensor:
+      - name: Sprinkler Config
+        unique_id: sprinkler_config_id
+        state: "{{ now() }}"
+        attributes:
+          programs: "{{ config.programs }}"
+          bad: "{{ config.bad if config.bad|length else ['Happy'] }}"
+
+
+
+  # -------- This template sensor just is used to display the errors found in the config file
+  # Probably don't really need this as a Markdown card might be bettoer display, but this can
+  # be added to an entities card right next to the button to reload the config.
+  - triggers:
+      - trigger: state
+        entity_id: sensor.sprinkler_config
+        attribute: bad
+    sensor:
+      - name: Sprinkler Config Issue
+        state: "{{ state_attr('sensor.sprinkler_config', 'bad')|join(', ') }}"
+
+
+script:
+
+  # Why does this turn an array of valves into dictionary keyed by valve names?
+  # I guess so can look up a valve by it's name??
+
+  sprinkler_load_config:
+    sequence:
+      - action: script.sprinkler_configuration
+        response_variable: config
+
+      - variables:
+          programs: >-
+            {% set ns = namespace(config={}, bad=[]) -%}
+
+            {% for p in config.programs %}
+              {% if 'enabled' in p and not p.enabled -%}
+                {% continue -%}
+              {% endif -%}
+              {% if not 'name' in p -%}
+                {% set ns.bad = ns.bad + ['Missing "name" for program #' ~ loop.index] -%}
+                {% continue -%}
+              {% endif -%}
+
+              {% set min = config.default_run_minutes or 10 -%}
+              {% set v_ns = namespace(valve={}) -%}
+              {% for v in p.valves -%}
+
+                {% set bad =
+                  'entity_id missing'if not 'entity_id' in v
+                  else 'bad entity: "' ~ v.entity_id ~ '"' if states(v.entity_id) == 'unknown'
+                  else 'Bad minutes for "' ~ v.entity_id ~ '" of "' ~ v.minutes ~ '"'
+                  if 'minutes' in v and v.minutes|int(-1) < 0
+                -%}
+                {% if bad -%}
+                  {% set ns.bad = ns.bad + [bad ~ ' in program "' ~ p.name ~ '" position: ' ~ loop.index] -%}
+                  {% continue -%}
+                {% endif -%}
+
+                {% set v_name = entity_name(v.entity_id) -%}
+                {%
+                  set min = v.minutes if 'minutes' in v
+                  else p.default_run_minutes if 'default_run_minutes' in p
+                  else min
+                -%}
+                {% set v_ns.valve = dict(v_ns.valve, **{v_name: [v.entity_id,min] }) -%}
+              {% endfor -%}
+
+              {% if v_ns.valve.keys()|length == 0 -%}
+                {% set ns.bad = ns.bad + ['Skipped program "' ~ p.name ~ '": no valid valves found.'] -%}
+                {% continue -%}
+              {% endif -%}
+
+              {% set this = {p.name: v_ns.valve } -%}
+              {% set ns.config = dict(ns.config,**this) -%}
+            {% endfor -%}
+            {{ { "programs": ns.config, "bad": ns.bad } -}}
+      - stop: End
+        response_variable: programs
+
+
+

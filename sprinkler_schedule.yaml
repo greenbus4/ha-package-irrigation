@@ -1,0 +1,107 @@
+#
+# Code related to running scheduled programs
+# Could be a simple automation that runs a program
+# or in this case uses the Local Calendar feature of Home Assistant
+#
+# NOTE Calendar's "summary" needs to be an exact match of the configured program name.
+# Add things like "Spring schedule" to the description in the calendar entry.
+#
+# Entities:
+#
+#
+#   sensor.sprinkler_upcoming_schedule
+#     This runs on a "trigger: time_pattern" (every 10 minutes?)
+#     to provide a structure to show future calandar events
+#
+#   automation.sprinkler_run_calendar_schedule
+#     This automation is triggered when a calendar event starts
+
+
+input_datetime:
+  sprinkler_enable_schedule_date:
+    name: Input with both date and time
+    has_date: true
+    has_time: true
+
+
+template:
+
+  #---------- Trace the upcoming schedule -----------------
+  # Generate an attribute that can be used to display the upcoming
+  # scheduled programs.
+  # 
+  - triggers:
+      - trigger: time_pattern
+        minutes: "/10"
+      - trigger: state
+        entity_id: input_button.sprinkler_reload_config_button
+    actions:
+      - action: calendar.get_events
+        response_variable: schedule
+        target:
+          entity_id: calendar.irrigation
+        data:
+          duration:
+            hours: 200
+      - action: script.sprinkler_configuration
+        response_variable: base_config
+    sensor:
+      - name: Sprinkler Upcoming Schedule
+        unique_id: sprinkler_upcoming_schedule_id
+        state: "{{ now() }}"
+        attributes:
+          events: |-
+            {% set config = base_config.programs|map(attribute='name')|list %}
+            {% set progs = state_attr('sensor.sprinkler_config', 'programs' ) %}
+            {% set ns = namespace(events=[]) %}
+            {% for event in schedule['calendar.irrigation']['events'] %}
+              {% if as_datetime(event.start) > now() %}
+                {% set ns.events = ns.events + [
+                  dict(
+                    start=event.start,
+                    program=event.summary,
+                    description=event.description,
+                    valid=(event.summary in config),
+                    enabled=(
+                      event.summary in progs
+                      and not ('enabled' in progs[event.summary] and not progs[event.summary].enabled )
+                    )
+                  )]
+                %}
+              {% endif %}
+            {% endfor %}
+            {{ ns.events }}
+            
+automation:
+
+  # Run a program based on the schedule
+  # Running for now as "queued" to hopefully catch
+  # two overlapping schedules. That's a bit of a race condition there.
+  # Note that any change to a calendar event needs to be 15 minutes
+  # in the future -- otherwise it probably won't get picked up.
+
+  - id: sprinkler_run_calendar_schedule_id
+    alias: Sprinkler Run Calendar Schedule
+    mode: queued
+
+
+    triggers:
+      - trigger: calendar
+        entity_id: calendar.irrigation
+        event: start
+    actions:
+      - action: script.sprinkler_run_program
+        data:
+          program_name: "{{ trigger.calendar_event.summary }}"
+
+
+  - id: turn_on_at_sprinkler_enable_schedule_date 
+    alias: Turn the schedule back on when a date arrives
+    mode: single
+    triggers:
+      - trigger: time
+        at: input_datetime.sprinkler_enable_schedule_date
+    actions:
+      - action: automation.turn_on
+        target:
+          entity_id: automation.sprinkler_run_calendar_schedule

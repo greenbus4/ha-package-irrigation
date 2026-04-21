@@ -1,0 +1,954 @@
+# ------------------------ Running the irrigation --------------------------------
+#
+# Overview:
+#
+#   - There's a script that simply returns a data structure of the programs in a simple layout.
+#     This data structure defines how long to run each valve in minutes. A valve that has zero minutes
+#     is skipped.
+#
+#   - A script parses, validates and reorganizes that when "reload config" is requested, and saves that data.
+#     This is the data that is used to populate the select lists.
+#     The two select are 1) program and 2) individual valves inside the selected program.
+#
+#   - There's a script to call for running a program -- this is intended for running a program based on a schedule
+#     (an automation that has times or using a calendar). Running a program manually or from a schedule should
+#     function the same. This is mostly intended for running schedules, of course.
+#
+#   - There's a slider that is in percentage that is multipled times the configured mintues to get the final
+#     run-time. The idea is that an external automation could adjust based on recent rain.
+#     It could adjust by season, perhaps, but that change should really be done it scheduling (e.g. run once a week
+#     instead of three times a week), or by defining season-based programs and then select those when scheduling.
+#     That keeps things simple instead of trying to add that feature here.
+#
+#   - There is also an include/exclude valve feature. It's the same thing as setting a specific valve to
+#     have a zero time, but can be done in the UI. It's really just for temporary changes.
+#
+#   - A program or a single valve can be run. A single valve is simply a queue with one valve defined.
+#     When program (or valve) is "run" it is processed into a list of valves that have minutes and are not "excluded'.
+#     This is when the precent is applied. The idea here is when a program is "run" it's runtimes and vavles are set
+#     at that time (e.g. changing percent while a program is running has no effect).
+#
+#   - A single timer is used. When timer is running the current valve is turned on, and when the timer pauses or stop
+#     the valve is turned off. When the timer finishes the next valve in the queue is started, if there is one.
+#     If the timer is cancelled no next valve is run.
+#     Running more that one valve at a time isn't allowed. Of course, that does not prevent creating a group
+#     and using that is the "vavle" to turn on/off.
+#
+#   - FIXME: There is a schedule on/off switch (input_boolean) -- but I'm not sure why. It's simply used as a condition in the schedule
+#     automation. Why not just disable the automation???
+#
+#   - There's also a master on/off switch, but it's really meant for pausing the entire system when, for example, there's
+#     low water pressure. Better to just disable the schedule (automation) and allow manual running still.
+#
+#
+#     Things that needs more consideration. For example:
+#
+#       - Should there be a binary to indicate that something is running (other than look at the timer)?
+#         Might want to base availablity on if a program is running and the timer has short gaps
+#         when it is idle between valves.
+#
+#       - Should water pressure test be included in this code? Or provided externally?
+#         Could always use this to schedule something that's not irrigation like a away-from-home lights?
+#         Update: added a master switch and use a separate automation to disable/enable based on pressure.
+#
+#       - Current system only allows running one switch at a time. Should have a way to have a
+#         separate top-level "controller"?
+#
+#       - Having ESPHome-like substitutions sure would be nice to include multiples of all the code.
+#
+#       - There's no master on/off switch (e.g. for starting a pump). There's no real hook and would the pump
+#         be turned off when pause is presseed?
+#         Frankly, if don't need spin-up time on the pump could just use a group and trigger on that. Might
+#         be more flexible (e.g. decide which pump, if any, goes with what groups of valves.
+#
+#       - One request was to be able to exclude a valve while a program is running. This is a bit of a problem as the
+#         valves are excluded when loading the queue (e.g. when running a program -- or single valve).
+#         One option is to check when "next_valve" is run (or when determining the next valve) to catch when excluding
+#         an upcoming valve when running a program.
+#         BUT, if you can exclude a valve while running a program, what does *including* a valve do?
+#         Mabye the best thing to do is not allow include/exclude *while* a program is running so that it's
+#         clear in the UI that it cannot be done while running.
+#
+#         Note:
+#           There was some confusion about include/exclude. This system is supposed to be an automatic system
+#           that runs on a schedule that includes an easy UI to exclude/include instaed of having to edit the
+#           config. E.g. for a temporary exclusion from a program. It's basically the same thing as editing the
+#           config and setting the minutes to zero for that one valve. It's not really intended for frequent manual
+#           running of programs.
+#
+#---------- Older issues: ----------
+#         UPDATE: Added a master switch "Sprinkler Master Switch" that does all of this.
+#                 I think the pause time-out continues. See comments on the switch below
+#
+#            For example, I have a script that would pause a *running* valve, but that doesn't prevent
+#             another schedule from starting. So, really do need a master "pause" that
+#               - pauses any running valve
+#               - prevents any new valves from running
+#              - disables running any scheduled events.
+#                 (But keep the schedule turned on so can alert if another schedule comes along while paused.)
+#----------------------------------
+#
+#
+#
+# TODO:
+#
+#   - The sprinkler timer is used to check the state. I wonder if there should not be
+#     either a method (script) or a saparate template entity to hide the timer away.
+#
+#   - There's a pause/resume entity -- maybe need separate pause and resume buttons
+#     so that external automations can pause and resume w/o knowing the current state.
+#
+#   - Related to pausing on low pressure -- should there be more of a master off that would
+#     prevent running schedules AND manual running?
+#     (Note that setting the percent to 0 would have the effect of master off for schedule
+#     and manual runs.) UPDATE: this is done.
+#
+#   - Should there be a way to do a "long pause"? For example, if a well pump shut off
+#     for some amount of time let the pause run until the pressure returned?
+#     But, how long to pause before giving up?
+#
+#   - And should a user-space script be called before running every valve to allow
+#     for skipping ("Hey, there's no water pressure.") or perhaps adjusting the minutes
+#     used to run the valve -- although that seems like too fine of control.)
+#
+#-----------------------------------------------------------------------------------------------------------------
+# Entities that deal mostly with running a valve or program
+#
+# Entities:
+#
+#   timer.sprinler_valve_time
+#     Only timer used. Timer for running a single valve. Only one valve can run at a time.
+#
+#   input_number.sprinkler_queue_position
+#     Pointer to the currently running valve in the queue.
+#     The queue is created when a program or valve is run (valve is a program with one valve)
+#
+#   input_text.sprinkler_log_message
+#     This is a formatted log message that is written as a sensor so that there's a histor
+#     The custom:logbook-card card is used to show activity
+#     Code calls script.sprinkler_log_message so that the messages are queued in the right order 
+#     and not lost (templates run in "single" mode so need a fire-and-forget.
+#
+#   scirpt.sprinkler_log_message
+#     This is called to log an event and write it to input_text.sprinkler_log_message.
+#     The point is it is run in queued mode so all message are processed.
+#
+#   script.sprinkler_run_program
+#     This script validate that the requested program is valid and that the timer is not running
+#     It then triggers an event "sprinkler_schedule_run_program".
+#     It should be called from an automation where aditional validate is needed on the passed-in
+#     progeram name.
+#
+#   sensor.sprinkler_queue
+#     This is triggered by pressing the buttons to run a program or a valve and it
+#     saves a "queue" of the current state of the program (e.g. what valves to run) and how long
+#     to run each one -- adjusting the time based on the percentage run time set at that moment.
+#     It is also triggered by event "sprinkler_schedule_run_program" which is suppose to be
+#     the input from an automation running a schedule (see script.sprinkler_run_program).
+#     The queue also saves the user that started the queue and the program and valve's friendly
+#     name for display purposes.
+#
+#
+#   sensor.sprinkler_display_message
+#     This sensor is triggered to create a display message for the UI
+#     and it also calls the (queued) script to save the message in the DB
+#     for the logbook/history of events.
+#
+#   
+#   sensor.sprinkler_exclude_list
+#     Adds or removes valves to a list attribute of exclued
+#     valves. These are skipped when building the queue when running a program.
+#     (Excluded valves can still be manually run.)
+#
+#   button.sprinkler_exclude_valve
+#   button.sprinkler_includee_valve
+#     Buttons to trigger adding/remove from list.
+#     Probably could be a single button but would have to update the text.
+#
+#   binary_sensor.sprinkler.valve_is_excluded
+#     Sensor to indicate if the currenly selected valve has been excluded or not.
+#     Used to know what buttons to make available.
+#
+#   button.sprinkler_run_program
+#   button.sprinkler_run_valve
+#     Trigger running a program or valve.
+#     Their "press" actions don't do anything as the queue template triggres on buttons press.
+#     The templates are used so that availability can be set (based on valid values and timer not running).
+#
+#   button.sprinkler_skip_valve
+#   button.sprinkler_all_stop
+#   button.sprinkler_pause_valve
+#     Control the running state.
+#
+#   sensor.sprinkler_remaining_time
+#     Sensore that runs every second to update the remaining time on the timer.
+#
+#   automation.sprinkler_program_events
+#     THIS is the meat of the queu processing. It handles a number of events
+#     It is triggred by:
+#       queue updates: soon as the queue's state is updated it starts running the queue
+#           (not quite sure that the queue's *attributes* are guarenteed to be update when its state changes)
+#
+#       turn valve on/off: when timer is on or off
+#
+#       next valve: when the timer finishes OR when home assistant restarts.
+#
+#         
+#
+#
+#
+
+
+
+# Exclude:
+#   the remaining time sensor that fires every second
+#   the status update messages
+recorder:
+  exclude:
+    entities:
+      - sensor.sprinkler_remaining_time
+      - sensor.sprinkler_display_message
+      - sensor.sprinkler_upcoming_schedule
+      - sensor.sprinkler_program_summary
+      - script.sprinkler_log_message
+
+logbook:
+  # Maybe *.sprinkler_*?
+  exclude:
+    entity_globs:
+      - sensor.sprinkler_*
+      - select.sprinkler_*
+      - button.sprinkler_*
+      - input_number.sprinkler_*
+      - input_text.sprinkler_*
+
+timer:
+  sprinkler_valve_time:
+    restore: true
+
+input_number:
+  sprinkler_current_queue_position:
+    min: 0
+    max: 50
+
+input_text:
+
+  # The script.sprinkler_log_message updates this. Using a script so it can be "queued" to not drop messages.
+  # See https://community.home-assistant.io/t/wth-no-queued-or-restart-mode-for-trigger-based-template-sensor-action/819289?
+  sprinkler_log_message:
+
+
+
+
+# This script is called to run a program (from an automation)
+# and it verifies that the program and valve are valid.
+# It then triggers an event to load the required schedule.
+# NOTE: Why do this when called from an automation (e.g. a schedule)
+# but not when a button is pressed to run a program or valve? Does that make sense?
+#
+#
+
+script:
+  sprinkler_run_program:
+    alias: Validates and runs a program passed in the program_name field
+    variables:
+      programs: "{{ state_attr('sensor.sprinkler_config', 'programs' ).keys()|list }}"
+    fields:
+      program_name:
+        name: Enter a valid (configured) program name
+        required: true
+        example: "Native Plant drips"
+        selector:
+          text:
+    sequence:
+      - choose:
+          - conditions: "{{ program_name not in programs }}"
+            sequence:
+              - action: persistent_notification.create
+                data:
+                  title: Sprinkler Error
+                  message: 'Attempted to run an invalid or disabled sprinkler program "{{ program_name }}" Options="{{ programs }}"'
+              - stop: 'Provided program name "{{ program_name }}" is not a currently available program.'
+                error: true
+
+          # Sure, a bit of a race here if this happens between valves.
+          - conditions: "{{ not is_state('timer.sprinkler_valve_time', 'idle') }}"
+            sequence:
+              - action: persistent_notification.create
+                data:
+                  title: Sprinkler Error
+                  message: 'Attempted to run sprinkler program "{{ program_name }}, but sprinklers are running.'
+        default:
+          - event: sprinkler_schedule_run_program
+            event_data:
+              program: "{{ program_name }}"
+
+
+
+  # This is a queued scirpt for writing "logs" to a input_text's state so that the custom:logbook-card can display it.
+  # Using a script so it can be "queued" and thus have to update an input_select (not a trigger-based template sensor).
+  # See: https://community.home-assistant.io/t/wth-no-queued-or-restart-mode-for-trigger-based-template-sensor-action/819289
+
+  sprinkler_log_message:
+    mode: queued
+    alias: Updates a text sensor based on the passed in message and user
+    fields:
+      message:
+        name: Message to add to the logs
+        required: true
+        selector:
+          text:
+      usere:
+        name: User to prefix the log with
+        required: true
+        selector:
+          text:
+    sequence:
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.sprinkler_log_message
+        data:
+          value: "{{ message }} by {{ user }}"
+
+
+template:
+
+
+  # Master on/off. This is NOT for general use. For seasonal shut-off just turn
+  # off the schedule which still allows manual operation of programs or valves.
+  # The purpose here is to have an abstraction to stop all use, e.g. in the case
+  # of low water pressure. It will "pause" a running timer and prevent any running
+  # of schedules, programs, or valves.
+  # I'm using a "switch" here because it runs actions on changes unlike a binary sensor.
+  # TODO: In general, there's a time limit on a pause to prevent forgeetting about it
+  # and then blocking future schedules from running. What should happen here?
+  # Maybe the better solution is to allow a schedule to override a pause IF the
+  # pause has been running too long?
+  #
+  # Where is the best place to disabled everything?
+  #   - option 1: have schedulear check and use availability for UI elements?
+  #   - option 2: block at the queue and report that the system is off?
+  #   - option 2: add conditions into the automation that does all the running work?
+  # NO: can't do option 2 -- you can stop the "actions" part, but the state still gets
+  # updated. You can add "conditions" but then the actions won't update (to log the issue).
+  # This is kind of fucked up. If use a condition then there's no (existing) code to
+  # run to log the issue. BUT, should only be able to do that IF there's no valves running/paused
+  # so maybe that's ok.
+  #
+  - switch:
+      name: Sprinkler Master Switch
+      unique_id: sprinkler_master_switch_id
+      turn_on:
+        - if:
+            - condition: state
+              entity_id: timer.sprinkler_valve_time
+              state: paused
+          then:
+            - action: timer.start
+              target:
+                entity_id: timer.sprinkler_valve_time
+      turn_off:
+        - if:
+            - condition: state
+              entity_id: timer.sprinkler_valve_time
+              state: active
+          then:
+            - action: timer.pause
+              target:
+                entity_id: timer.sprinkler_valve_time
+
+
+  # This template saves of the queue with updated run times.
+  # It is triggered either by the buttons to run a program or valve, or
+  # via a direct event to load a program.
+  # The state is the current time and the running of the "queue" is triggered when
+  # the state is changed.
+  # QUESTION: does the state changed event happen before the code updates the attributes?
+  # Finding user:
+  #   button action => trigger.to_state.context.user_id
+  #   button that triggers another script: trigger.event.context.parent_id => caller's ID
+  #   timer: parent and user ids are null. But you can see trigger.platform == 'time'
+  #   Manually fire event from dev console: trigger.event.context.user_id
+  #   BUT -- those are the direct triggers. An automation that triggers and then calls this (via event)
+  #   will NOT have the context to show where it came from.
+  #   NOT EVEN the parent_id!
+  - triggers:
+      - trigger: state
+        entity_id:
+          - button.sprinkler_run_program
+          - button.sprinkler_run_valve
+        not_to:
+          - unavailable
+          - unknown
+        not_from:
+          - unavailable
+        id: button_press
+      - trigger: event
+        event_type: sprinkler_schedule_run_program
+        id: set_queue
+    actions:
+      - variables:
+          single: "{{ false if trigger.id == set_queue else trigger.entity_id == 'button.sprinkler_run_valve' }}"
+          percent: "{{ states('input_number.sprinkler_valve_percent_runtime')|int(0) }}"
+          progs: "{{ state_attr('sensor.sprinkler_config', 'programs' ) }}"
+          exclude_list: "{{ state_attr('sensor.sprinkler_exclude_list','list') }}"
+          m: "{{ states('input_number.sprinkler_valve_minutes') }}"
+          p: "{{ trigger.event.data.program if trigger.id == 'set_queue' else states('select.sprinkler_program' ) }}"
+          v: "{{ states('select.sprinkler_valve') }}"
+          q: |-
+            {{
+                [progs[p][v]] if single and p in progs and v in progs[p]
+                else progs[p].values()|list if not single and p in progs
+                else []
+            }}
+          valves: |-
+            {% set ns = namespace(valves=[]) %}
+            {% for v in q -%}
+              {% set min = m|int(0) if single else (v[1]|int(0) * percent / 100)|int(0) -%}
+              {% if min and (single or not v[0] in exclude_list) -%}
+                {% set ns.valves = ns.valves + [ [v[0], min] ] -%}
+              {% endif -%}
+            {% endfor %}
+            {{ ns.valves }}
+
+          # This doesn't cover all the cases. Like if triggered by an event in the UI, where there would be a user_id available.
+          user: |-
+            {{
+              'Schedule' if trigger.id == 'set_queue' 
+              else 
+                states.person 
+                | selectattr( "attributes.user_id", "==", trigger.to_state.context.user_id)
+                | map(attribute="attributes.friendly_name")
+                | first
+            }}
+      - action: script.sprinkler_log_message
+        data:
+          user:  "{{ user }}"
+          message: |-
+            {{ 
+              'Nothing to run as all valves have no times' if not valves|length else
+              'Starting valve "' ~ v ~ '"' if single else
+              'Starting program "' ~ p ~ '"'
+            }}
+    sensor:
+      - name: Sprinkler Queue
+        unique_id: sprinkler_queue_id
+        state: "{{ now() }}"
+        attributes:
+          queue: "{{ valves }}"
+          prog: "{{ p }}"
+          valve: "{{ v }}"
+          user: "{{ user }}"
+
+
+  # This template sensor is pure UI candy, and isn't used elsewhere.
+  # This essentiall generates the queue as above, but for displaying what valves will run and for how long.
+  - triggers:
+      - trigger: state
+        entity_id:
+          - select.sprinkler_program
+          - input_number.sprinkler_valve_percent_runtime
+        not_to:
+          - unavailable
+          - unknown
+        not_from:
+          - unavailable
+        id: button_press
+    actions:
+      - variables:
+          percent: "{{ states('input_number.sprinkler_valve_percent_runtime')|int(0) }}"
+          progs: "{{ state_attr('sensor.sprinkler_config', 'programs' ) }}"
+          exclude_list: "{{ state_attr('sensor.sprinkler_exclude_list','list') }}"
+          p: "{{ states('select.sprinkler_program' ) }}"
+          q: "{{ progs[p].values()|list if p in progs else [] }}"
+    sensor:
+      - name: Sprinkler Program Summary
+        unique_id: sprinkler_program_summary_id
+        state: "{{ now() }}"
+        attributes:
+          program:  |-
+            {% set ns = namespace(valves=[],total_time=0.0) %}
+            {% for v in q -%}
+              {% set min =  (v[1]|int(0) * percent / 100)|int(0) -%}
+              {% set ns.valves = ns.valves + [ [ v[0], min, v[0] in exclude_list ] ] -%}
+              {% if not v[0] in exclude_list -%}
+                {% set ns.total_time = ns.total_time + min -%}
+              {% endif -%}
+            {% endfor %}
+            {{ dict(summary=ns.valves, total_time=ns.total_time)  }}
+
+
+  # Note that template triggers run in "single" mode, so there is a race where a later update doesn't get recorded
+  - triggers:
+      - trigger: event
+        event_type: sprinkler_set_status_message
+    variables:
+      data: "{{ trigger.event.data }}"
+      message: "{{ data.message }}"
+      title: "{{ data.title if 'title' in data else 'Info' }}"
+      next:  "{{ data.next if 'next' in data else '' }}"
+      prog:  "{{ data.prog if 'prog' in data else '' }}"
+      user:  "{{ data.user if 'user' in data else state_attr('sensor.sprinkler_queue','user') }}"
+
+    actions:
+      - if:
+          - condition: template
+            value_template: "{{ not 'Paused' in title }}"
+        then:
+        - action: script.sprinkler_log_message
+          data:
+            message: "{{ message }}"
+            user:  "{{ user }}"
+
+    sensor:
+      - name: Sprinkler Display Message
+        unique_id: sprinkler_display_message_id
+        state: "{{ message }}"
+        icon: mdi:information
+        attributes:
+          title: "{{ title }}"
+          next:  "{{ next }}"
+          prog:  "{{ prog }}"
+          user:  "{{ user }}"
+
+
+  # ------ This template adds or removes an entity id from a list.
+  - triggers:
+      - trigger: event
+        event_type: sprinkler_exclude_valve
+        id: exclude
+      - trigger: event
+        event_type: sprinkler_include_valve
+        id: include
+      - trigger: event
+        event_type: sprinkler_clear_exclude_list
+        id: clear
+
+    sensor:
+      - name: Sprinkler Exclude List
+        state: "{{ now() }}"
+        attributes:
+          list: |-
+            {% set list = this.attributes.list if 'list' in this.attributes else [] %}
+            {% set cur_list = list if list is iterable and list is not string else [] %}
+            {% set entity_id = state_attr('binary_sensor.sprinkler_valve_is_excluded','cur_valve_entity') %}
+            {{
+              none if trigger.id == 'clear'
+              else (cur_list + [entity_id])|unique|list if trigger.id == 'exclude'
+              else cur_list|reject('match',entity_id)|list
+            }}
+
+  # This reports if the current selected valve is in the exclude list
+  # unavailable when there's no valve selcted to check.
+  - triggers:
+      - trigger: state
+        entity_id:
+          - select.sprinkler_program
+          - select.sprinkler_valve
+          - sensor.sprinkler_exclude_list
+        not_to:
+          - unavailable
+          - unknown
+    actions:
+      - variables:
+          progs: "{{ state_attr('sensor.sprinkler_config', 'programs' ) }}"
+          p: "{{ states('select.sprinkler_program' ) }}"
+          v: "{{ states('select.sprinkler_valve') }}"
+          exclude_list: "{{ state_attr('sensor.sprinkler_exclude_list','list') }}"
+          valve_entity: >
+            {{
+              progs[p][v][0]
+                if progs is mapping and p in progs
+                and progs[p] is mapping and v in progs[p]
+                else false
+            }}
+    binary_sensor:
+      - name: Sprinkler Valve Is Excluded
+        state: "{{ true if  exclude_list is iterable and  valve_entity in exclude_list }}"
+        availability: "{{ true if valve_entity else false }}"
+        attributes:
+          cur_valve_entity: "{{ valve_entity }}"
+
+
+
+
+
+  # Beacuse using is_state() should never match "unknown".
+  # FIXME: remove the other 'unknown' from the run valve
+  - button:
+      - name: Sprinkler run program
+        unique_id: sprinkler_run_program_button_id
+        availability: >
+          {{
+            not (is_state('select.sprinkler_program', ['unavailable', states('input_text.sprinkler_select_default_text')] )
+            or is_state('timer.sprinkler_valve_time', ['paused','active']))
+          }}
+        press:
+          - stop: End
+
+
+      - name: Sprinkler run valve
+        unique_id: sprinkler_run_valve_id
+        availability: >
+          {{
+            not (
+              is_state('select.sprinkler_valve', ['unknown', 'unavailable', states('input_text.sprinkler_select_default_text')] )
+              or is_state('timer.sprinkler_valve_time', ['paused','active'])
+              or states('input_number.sprinkler_valve_minutes')|int(0) == 0
+            )
+          }}
+        press:
+          - stop: End
+
+
+      - name: Sprinkler Skip Valve
+        unique_id: sprinkler_skip_valve_id
+        icon: mdi:skip-next
+        availability: >
+          {{ is_state('timer.sprinkler_valve_time', ['paused','active'] ) }}
+        press:
+          - action: timer.finish
+            target:
+              entity_id: timer.sprinkler_valve_time
+          - action: script.sprinkler_log_message
+            data:
+              message: Pressed Skip
+              user: |-
+                {{
+                  states.person 
+                  | selectattr( "attributes.user_id", "==", context.user_id)
+                  | map(attribute="attributes.friendly_name")
+                  | first
+                }}
+
+      - name: Sprinkler All Stop
+        unique_id: sprinkler_all_stop_id
+        icon: mdi:stop
+        availability: "{{ is_state('timer.sprinkler_valve_time', ['paused','active'] ) }}"
+        press:
+          - action: timer.cancel
+            target:
+              entity_id: timer.sprinkler_valve_time
+          - action: script.sprinkler_log_message
+            data:
+              message: Pressed Stop
+              user: |-
+                {{
+                  states.person 
+                  | selectattr( "attributes.user_id", "==", context.user_id)
+                  | map(attribute="attributes.friendly_name")
+                  | first
+                }}
+          # Also, reset the queue pointer -- this is to prevent running the "next" valve when HA restarts
+          # HA restarts will start up on the next valve if the timer is not running.
+          - action: input_number.set_value
+            target:
+              entity_id: input_number.sprinkler_current_queue_position
+            data:
+              value: "{{ state_attr('sensor.sprinkler_queue', 'queue' ) | length }}"
+
+
+      - name: Sprinkler Timer Pause
+        unique_id: sprinkler_timer_pause_id
+        icon: "{{ 'mdi:pause-circle' if is_state('timer.sprinkler_valve_time','active' ) else 'mdi:play-circle' }}"
+        availability: "{{ is_state('timer.sprinkler_valve_time', ['paused','active'] ) }}"
+        press:
+          - action: script.sprinkler_log_message
+            data:
+              message: "Pressed {{ 'Pause' if is_state('timer.sprinkler_valve_time','active') else 'Resume' }}"
+              user: |-
+                {{
+                  states.person 
+                  | selectattr( "attributes.user_id", "==", context.user_id)
+                  | map(attribute="attributes.friendly_name")
+                  | first
+                }}
+          - action: >-
+              timer.{{ 'start' if
+              is_state('timer.sprinkler_valve_time','paused') else 'pause' }}
+            target:
+              entity_id: timer.sprinkler_valve_time
+
+
+
+      # Could this be a toggle?
+      # No validation is here.
+      - name: Sprinkler Exclude Valve
+        unique_id: sprinkler_exclude_valve_id
+        availability: "{{ not is_state('binary_sensor.sprinkler_valve_is_excluded', ['unavailable','on']) }}"
+        press:
+          - event: sprinkler_exclude_valve
+
+          - action: script.sprinkler_log_message
+            data:
+              message: "Valve '{{ entity_name(state_attr('binary_sensor.sprinkler_valve_is_excluded','cur_valve_entity')) }}' was excluded"
+              user: |-
+                {{
+                  states.person 
+                  | selectattr( "attributes.user_id", "==", context.user_id)
+                  | map(attribute="attributes.friendly_name")
+                  | first
+                }}
+
+
+      - name: Sprinkler Include Valve
+        unique_id: sprinkler_include_valve_id
+        availability: "{{ not is_state('binary_sensor.sprinkler_valve_is_excluded', ['unavailable','off']) }}"
+        press:
+          - event: sprinkler_include_valve
+          - action: script.sprinkler_log_message
+            data:
+              message: "Valve '{{ entity_name(state_attr('binary_sensor.sprinkler_valve_is_excluded','cur_valve_entity')) }}' was included"
+              user: |-
+                {{
+                  states.person 
+                  | selectattr( "attributes.user_id", "==", context.user_id)
+                  | map(attribute="attributes.friendly_name")
+                  | first
+                }}
+
+
+
+
+  # This generates the count-down timer.
+  # MUST EXCLUDE FROM RECORDER
+  - trigger:
+    - platform: time_pattern
+      seconds: '/1'
+    sensor:
+    - name: Sprinkler Remaining Time
+      state: >
+        {% set end = state_attr('timer.sprinkler_valve_time', 'finishes_at') %}
+        {% if end is not none %}
+          {{ time_until(end | as_datetime) }}
+        {% else %}
+          {{ 'Paused' if is_state('timer.sprinkler_valve_time','paused') else 'Stopped' }}
+        {% endif %}
+
+
+automation:
+
+
+  - id: sprinkler_program_events_id
+    alias: Sprinkler Program Events
+    mode: queued
+
+    triggers:
+
+      - id: reset_queue_start_timer
+        trigger: state
+        entity_id: sensor.sprinkler_queue
+        not_to:
+          - unavailable
+          - unknown
+        not_from:
+          - unavailable
+
+      - id: turn_valve_on
+        trigger: event
+        event_type:
+          - timer.started
+          - timer.restarted
+        event_data:
+          entity_id: timer.sprinkler_valve_time
+
+      - id: turn_valve_off
+        trigger: event
+        event_type:
+          - timer.paused
+          - timer.cancelled
+        event_data:
+          entity_id: timer.sprinkler_valve_time
+
+      - id: next_valve
+        trigger: event
+        event_type:
+          - timer.finished
+        event_data:
+          entity_id: timer.sprinkler_valve_time
+
+      - id: paused_too_long
+        trigger: state
+        entity_id:
+          - timer.sprinkler_valve_time
+        to: paused
+        for:
+          hours: 0
+          minutes: 10
+          seconds: 0
+
+      - id: next_valve
+        trigger: homeassistant
+        event: start
+
+
+    actions:
+      - variables:
+          queue: "{{ state_attr('sensor.sprinkler_queue', 'queue' ) }}"
+
+
+      # And this is just here to report trying to run when master is turned off
+      # Clearly, this is fucked. Not integrated correctly.
+      # As-is, can still pause/resume but valve stays off.
+      # Could add availablity for all the fucking buttons, but that sucks shit.
+      # Really fucked. Kill this shit.
+      - if:
+          - condition: state
+            entity_id: switch.sprinkler_master_switch
+            state: "off"
+          - condition: trigger
+            id:
+              - turn_valve_on
+              - next_valve
+        then:
+          - event: sprinkler_set_status_message
+            event_data:
+              message: 'Cannot start. Master switch is off. Check pressure.'
+              title: Alert
+          - stop: End
+
+      # Bail with an error if there's no queue to run.
+      # This could happen if all minutes are zero, so maybe not an error.
+      - if:
+          - condition: template
+            value_template: "{{ queue|length == 0 }}"
+        then:
+          - event: sprinkler_set_status_message
+            event_data:
+              message: Can not start because no valves to run ({{ trigger.id }})
+              title: Alert
+          - stop: Why did this script run with no queue?
+            error: true
+
+
+      # Special case of queue updated, reset the pointer.
+      - if:
+          - condition: trigger
+            id: reset_queue_start_timer
+        then:
+          - action: input_number.set_value
+            target:
+              entity_id: input_number.sprinkler_current_queue_position
+            data:
+              value: 1
+          - action: timer.start
+            target:
+              entity_id: timer.sprinkler_valve_time
+            data:
+              duration: "{{ 60 * queue[0][1] }}"
+          - stop: Nothing more
+
+
+      - variables:
+          queue_idx: "{{ states('input_number.sprinkler_current_queue_position' )|int }}"
+          cur_valve_entity: "{{ queue[queue_idx-1][0] }}"
+          next_valve: "{{ [] if queue_idx == queue|length else queue[queue_idx] }}"
+          cur_valve_name: "{{ entity_name(cur_valve_entity) }}"
+
+
+      # Catch HA restart where the timer is still running.
+      - if:
+          - condition: trigger
+            id: next_valve
+          - condition: template
+            value_template: "{{ trigger.platform == 'homeassistant' }}"
+        then:
+          - if:
+              - condition: template
+                value_template: "{{ not is_state('timer.sprinkler_valve_time','idle') }}"
+            then:
+              - action: system_log.write
+                data:
+                  message: "HA Restarted but Sprinkler timer still running. No changes needed."
+              - stop: HA restarted but timer still running.
+            else:
+              - if:
+                  - condition: template
+                    value_template: "{{ is_state(cur_valve_entity, 'on') }}"
+                then:
+                - action: system_log.write
+                  data:
+                    message: "HA Restarted. Stopping valve {{ cur_valve_name }}"
+                - action: homeassistant.turn_off
+                  target:
+                    entity_id: "{{ cur_valve_entity }}"
+
+
+      - if:
+          - condition: trigger
+            id: turn_valve_on
+        then:
+          - action: homeassistant.turn_on
+            target:
+              entity_id: "{{ cur_valve_entity }}"
+          - event: sprinkler_set_status_message
+            event_data:
+              title: Running
+              message:  "{{ cur_valve_name }}"
+              next: "{{ entity_name(next_valve[0]) if next_valve|length else '' }}"
+              prog: "{{ state_attr('sensor.sprinkler_queue','prog') if queue|length > 1 else '' }}"
+
+      # Time paused, canceled
+      - if:
+          - condition: trigger
+            id: turn_valve_off
+        then:
+          - action: homeassistant.turn_off
+            target:
+              entity_id: "{{ cur_valve_entity }}"
+
+          - if:
+              - condition: template
+                value_template: "{{ is_state('timer.sprinkler_valve_time','paused') }}"
+            then:
+              - event: sprinkler_set_status_message
+                event_data:
+                  title: Paused until
+                  message: "{{ (now() + timedelta(minutes=10)).strftime( '%H:%M:%S') }}"
+                  next: "{{ entity_name(next_valve[0]) if next_valve|length else '' }}"
+                  prog: "{{ state_attr('sensor.sprinkler_queue','prog') if queue|length > 1 else '' }}"
+            else:
+              - event: sprinkler_set_status_message
+                event_data:
+                  message: Stopped
+
+
+
+      # Timer finished
+      - if:
+          - condition: trigger
+            id: next_valve
+        then:
+          - action: homeassistant.turn_off
+            target:
+              entity_id: "{{ cur_valve_entity }}"
+
+          - if:
+              - condition: template
+                value_template: "{{ next_valve|length > 0 }}"
+            then:
+              - delay:
+                  seconds: 2
+              - action: input_number.increment
+                target:
+                  entity_id: input_number.sprinkler_current_queue_position
+              - action: timer.start
+                target:
+                  entity_id: timer.sprinkler_valve_time
+                data:
+                  duration: "{{ 60 * next_valve[1] }}"
+            else:
+              - event: sprinkler_set_status_message
+                event_data:
+                  message: Completed
+
+
+      # Really need a separate message.
+      - if:
+          - condition: trigger
+            id: paused_too_long
+        then:
+          - action: timer.finish
+            target:
+              entity_id: timer.sprinkler_valve_time
+

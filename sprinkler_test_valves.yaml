@@ -1,0 +1,43 @@
+
+# Test valves for now:
+input_boolean:
+  sprinkler_sequence_running:
+    name: Sprinkler Sequence Running
+
+  test_valve_1:
+    name: Test Valve 1
+
+
+  test_valve_2:
+    name: Test Valve 2
+
+  test_valve_3:
+    name: Test Valve 3
+
+  test_valve_4:
+    name: Test Valve 4
+
+  test_valve_5:
+    name: Test Valve 5
+
+  test_valve_6:
+    name: Test Valve 6
+
+  test_valve_7:
+    name: Test Valve 7
+
+  test_valve_8:
+    name: Test Valve 8
+
+  test_valve_9:
+    name: Test Valve 9
+
+  test_valve_10:
+    name: Test Valve 10
+
+  test_valve_11:
+    name: Test Valve 11
+
+  test_valve_12:
+    name: Test Valve 12
+
