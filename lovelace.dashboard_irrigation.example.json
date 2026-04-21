@@ -1,0 +1,938 @@
+{
+  "version": 1,
+  "minor_version": 1,
+  "key": "lovelace.dashboard_irrigation",
+  "data": {
+    "config": {
+      "views": [
+        {
+          "type": "sections",
+          "max_columns": 4,
+          "path": "the_sprinklers",
+          "sections": [
+            {
+              "type": "grid",
+              "cards": [
+                {
+                  "type": "markdown",
+                  "content": "## Our Bespoke Irrigation System\n\n{% if (states('input_number.sprinkler_valve_percent_runtime')|int - 100)|abs >\n10 %}<ha-alert alert-type=\"info\">NOTE: the minutes percent is set at {{\nstates('input_number.sprinkler_valve_percent_runtime',\nrounded=True,with_unit=True) }}</ha-alert> {% endif %}\n\n{% if is_state('switch.sprinkler_master_switch','off') %}\n<ha-alert alert-type=\"error\">Sprinkler system disabled. Check water pressure.</ha-alert>\n{% elif is_state('automation.sprinkler_run_calendar_schedule','off') %}\n<ha-alert alert-type=\"warning\">Sprinkler Schedule is disabled.</ha-alert>\n{% elif is_state('timer.sprinkler_valve_time', 'idle') %}\n  {% set running = label_entities(\"Sprinkler Valve\")\n    | select('is_state', 'on')\n    | expand\n    | map(attribute='name')\n    | list\n  %}    \n  {% if running|length > 0 %}\n  <ha-alert alert-type=\"warning\">VALVE Open?? {{ running|first }}</ha-alert>\n  {% endif %}\n\n{% endif %}\n\n{% set pressure = states('sensor.irrigation_water_monitor_water_pressure')|float(0) %}\n{% if pressure < 35.0 %}\n<ha-alert alert-type=\"error\">Water pressure is too low! It's now {{ pressure|round(0) }} psi.</ha-alert>\n{% endif %}\n\n\n{% set msg = states('sensor.sprinkler_display_message' ) %}\n\n{% set title = state_attr('sensor.sprinkler_display_message', 'title') %}\n\n{% set prog = state_attr('sensor.sprinkler_display_message', 'prog') %}\n\n{% set next = state_attr('sensor.sprinkler_display_message', 'next') %}\n\n\n\n<table width=\"100%\"> \n\n{% if prog %} \n\n<tr>\n  <td align_left><ha-icon icon=\"mdi:format-list-checkbox\"></ha-icon> Program:</td>\n  <td align=right>{{ prog }}</td>\n</tr> \n\n{% endif %}\n\n\n<tr>\n  <td align_left><ha-icon icon=\"mdi:information-outline\"></ha-icon> {{ title }}:</td>\n  <td align=right>{{ msg }}</td>\n</tr>\n\n\n{% if is_state('timer.sprinkler_valve_time', ['active','paused']) %}\n\n<tr>\n  <td align_left><ha-icon icon=\"mdi:clock\"></ha-icon> Remaining:</td>\n  <td align=right>{{ states('sensor.sprinkler_remaining_time') }}</td>\n</tr> \n\n<tr>\n  <td align_right><ha-icon icon=\"mdi:waves-arrow-right\"></ha-icon> Flow:</td>\n  <td align=right>{{ states('sensor.irrigation_water_monitor_flow',True,True) }} @ {{ states('sensor.irrigation_water_monitor_water_pressure', true, true) }}</td>\n</tr>\n\n{% endif %}\n\n\n{% if next %}\n\n<tr>\n  <td align_left><ha-icon icon=\"mdi:page-next-outline\"></ha-icon> Next Valve:</td>\n  <td align=right>{{ next }}</td>\n</tr>\n\n{% endif %}\n",
+                  "text_only": true,
+                  "card_mod": {
+                    "style": {
+                      "ha-markdown $": "td {\n  border: none !important;\n  padding: 4px !important;\n}\n"
+                    }
+                  }
+                },
+                {
+                  "type": "entities",
+                  "entities": [
+                    {
+                      "type": "buttons",
+                      "entities": [
+                        {
+                          "entity": "button.sprinkler_skip_valve",
+                          "name": "Skip",
+                          "tap_action": {
+                            "action": "toggle"
+                          },
+                          "hold_action": {
+                            "action": "none"
+                          }
+                        },
+                        {
+                          "entity": "button.sprinkler_timer_pause",
+                          "name": "Pause/Resume",
+                          "tap_action": {
+                            "action": "toggle"
+                          },
+                          "hold_action": {
+                            "action": "none"
+                          }
+                        },
+                        {
+                          "entity": "button.sprinkler_all_stop",
+                          "name": "Stop",
+                          "tap_action": {
+                            "action": "toggle"
+                          },
+                          "hold_action": {
+                            "action": "none"
+                          }
+                        }
+                      ],
+                      "card_mod": {
+                        "style": {
+                          "hui-buttons-base $": "{% set color = ['green','yellow','red'] %}\n{% for entity in config.entities %}\n{% set m = \"Don't need to check for unavailable because this gets overridden.\" %}\nha-assist-chip:nth-child({{loop.index}}) {\n  state-badge {\n    color: {{ color[loop.index0] }};\n  }\n}  {% endfor %}\n",
+                          "hui-buttons-base $ ha-assist-chip:nth-child(1) $": "div.container.has-icon {\n  cursor: {{ 'not-allowed' if is_state(config.entities[0].entity, 'unavailable') }}\n}    \n",
+                          "hui-buttons-base $ ha-assist-chip:nth-child(2) $": "div.container.has-icon {\n  cursor: {{ 'not-allowed' if is_state(config.entities[1].entity, 'unavailable') }}\n}    \n",
+                          "hui-buttons-base $ ha-assist-chip:nth-child(3) $": "div.container.has-icon {\n  cursor: {{ 'not-allowed' if is_state(config.entities[2].entity, 'unavailable') }}\n}    \n"
+                        }
+                      }
+                    },
+                    {
+                      "type": "section",
+                      "label": "Select A Program"
+                    },
+                    {
+                      "entity": "select.sprinkler_program",
+                      "tap_action": {
+                        "action": "none"
+                      }
+                    },
+                    {
+                      "type": "buttons",
+                      "entities": [
+                        {
+                          "entity": "button.sprinkler_run_program",
+                          "name": "Run Program",
+                          "icon": "mdi:run-fast",
+                          "tap_action": {
+                            "action": "toggle"
+                          }
+                        }
+                      ],
+                      "card_mod": {
+                        "style": {
+                          "hui-buttons-base $ ha-chip-set": "ha-assist-chip:nth-child(1) state-badge {\n  color: green;\n}\n",
+                          "hui-buttons-base $ ha-assist-chip:nth-child(1) $": "div.container.has-icon {\n  cursor: {{ 'not-allowed' if is_state(config.entities[0].entity, 'unavailable') }}\n}    \n"
+                        }
+                      }
+                    }
+                  ],
+                  "card_mod": {
+                    "style": {
+                      ".": "ha-card {\n  –ha-card-box-shadow: none;\n  background-color: transparent;\n  border-radius: none;\n  border: none;\n}\n"
+                    }
+                  }
+                },
+                {
+                  "type": "markdown",
+                  "content": "{% set program = state_attr('sensor.sprinkler_program_summary','program') %}\n{% if program is mapping and 'total_time' in program %}\n  {% set seconds = program.total_time|int * 60 %}\n  {% if seconds > 0 %}\n  <details><summary>Selected program details...</summary>\n  <table width=\"100%\">\n  {% for valve in program.summary %}\n  <tr>\n    <td>{{ state_attr(valve[0],'friendly_name') }}</td>\n    <td>{{ 'excluded' if valve[2] else valve[1] ~ ' min' }}</td>\n  </tr>\n  {% endfor %}\n  <tr>\n    <td><i>Total Run Time</i></td>\n    <td>{{ seconds | timestamp_custom('%Hh %Mm', False) }}</td>\n  </table>\n  </details>\n  {% endif %}\n{% endif %}",
+                  "text_only": true,
+                  "card_mod": {
+                    "style": {
+                      "ha-markdown $": "td {\n  border: none !important;\n  padding: 2px !important;\n}\n"
+                    }
+                  }
+                },
+                {
+                  "type": "entities",
+                  "entities": [
+                    {
+                      "type": "section",
+                      "label": "Optionally, select a single valve from the above program:"
+                    },
+                    {
+                      "entity": "select.sprinkler_valve",
+                      "tap_action": {
+                        "action": "none"
+                      },
+                      "uix": {
+                        "style": ":host {\n  cursor: {{ 'not-allowed;' if is_state('select.sprinkler_valve','unavailable') else 'arrow' }}\n}\n"
+                      }
+                    },
+                    {
+                      "entity": "input_number.sprinkler_valve_minutes",
+                      "tap_action": {
+                        "action": "none"
+                      },
+                      "uix": {
+                        "style": ":host {\n  display: {{ 'none' if is_state('button.sprinkler_run_valve', 'unavailable') else 'block' }} !important;\n}\n"
+                      }
+                    },
+                    {
+                      "type": "buttons",
+                      "entities": [
+                        {
+                          "entity": "button.sprinkler_run_valve",
+                          "name": "Run this valve",
+                          "icon": "mdi:run",
+                          "tap_action": {
+                            "action": "toggle"
+                          }
+                        },
+                        {
+                          "entity": "button.sprinkler_exclude_valve",
+                          "name": "Exclude Valve",
+                          "icon": "mdi:trash-can-outline",
+                          "tap_action": {
+                            "action": "toggle"
+                          },
+                          "hold_action": {
+                            "action": "none"
+                          }
+                        },
+                        {
+                          "entity": "button.sprinkler_include_valve",
+                          "name": "Include Valve",
+                          "icon": "mdi:plus",
+                          "tap_action": {
+                            "action": "toggle"
+                          },
+                          "hold_action": {
+                            "action": "none"
+                          }
+                        }
+                      ],
+                      "uix": {
+                        "style": {
+                          "hui-buttons-base $ ha-chip-set": "{% set run_not_avail = is_state('button.sprinkler_run_valve','unavailable') %}\n\nha-assist-chip:nth-of-type(1) {\n  display: {{ 'none' if run_not_avail else 'revert' }};\n  state-badge {\n    color: green;\n  }\n}\nha-assist-chip:nth-of-type(2) {\n  display: {{ 'none' if run_not_avail or is_state('button.sprinkler_exclude_valve','unavailable') else 'revert' }};\n\n  state-badge {\n    color: red;\n  }\n}\n\nha-assist-chip:nth-of-type(3) {\n  display: {{ 'none' if run_not_avail or is_state('button.sprinkler_include_valve','unavailable') else 'revert' }};\n\n  state-badge {\n    color: green;\n  }\n}\n\n     \n",
+                          "hui-buttons-base $ ha-assist-chip:nth-child(1) $": "div.container.has-icon {\n  cursor: {{ 'not-allowed' if is_state(config.entities[0].entity, 'unavailable') }}\n}    \n"
+                        }
+                      }
+                    }
+                  ],
+                  "uix": {
+                    "style": {
+                      ".": "ha-card {\n  –ha-card-box-shadow: none;\n  background-color: transparent;\n  border-radius: none;\n  border: none;\n}\n"
+                    }
+                  },
+                  "visibility": [
+                    {
+                      "condition": "state",
+                      "entity": "select.sprinkler_valve",
+                      "state_not": "unavailable"
+                    }
+                  ]
+                },
+                {
+                  "type": "markdown",
+                  "content": "{% set excludes = state_attr('sensor.sprinkler_exclude_list','list') %}\n{% if excludes is not none and excludes | length > 0 %}\n### Excluded valves:\n{% set ns = namespace(v=[]) %}\n{% for ex in excludes %}\n  {% set ns.v = ns.v + ['💧 '  ~ state_attr(ex,'friendly_name')] %}\n{% endfor %}\n{{ ns.v|sort|join(\"\\n\") }}\n{% else %}\n### No valves are currently excluded.\n{% endif %}\n\n"
+                },
+                {
+                  "type": "markdown",
+                  "content": "{% if is_state('automation.sprinkler_run_calendar_schedule','off') %}\n<ha-alert alert-type=\"warning\">This sprinkler schedule is disabled.</ha-alert>\n{% endif %}\n{% set ns = namespace(cur_day='') %}\n{% set events = state_attr('sensor.sprinkler_upcoming_schedule','events') %}\n{% set programs = state_attr('sensor.sprinkler_config','programs') -%}\n{% set excluded = state_attr('sensor.sprinkler_exclude_list','list') -%}\n{% set percent = states('input_number.sprinkler_valve_percent_runtime')|int(100)/100 -%}\n\n\n{% if not events %}\n## No scheduled programs at this time\n{% else %}\n## Next programs:\n\n{% for event in events %}\n{% set date = as_datetime(event.start) %}\n{% set day = date.strftime('%A %b %d, %Y') %}\n{% set prog_name = event.program %}\n\n{% if day != ns.cur_day %}\n***\n### {{ day }}\n{% endif %}\n\n{% if not event.valid %}\nUNKNOWN PROGRAM: \"{{ prog_name }}\"\n{% else %}\n{% set ns.cur_day = day %}\n\n{% set summary = namespace(valve=[],total_time=0) -%}\n{% set prog = programs[prog_name] if prog_name in programs else {} -%}\n{% for valve_name in prog.keys() -%}\n{% set minutes = 0 if prog[valve_name][0] in excluded else (prog[valve_name][1] * percent)|int(0) -%}\n{% set summary.valve = summary.valve + [[ valve_name, 'excluded' if minutes == 0 else minutes ~ ' min'] ] -%}\n{% set summary.total_time = summary.total_time + minutes|int -%}\n{% endfor -%}\n{% set start_time = date -%}\n{% set end_time = start_time + timedelta(minutes=summary.total_time) -%}\n<details><summary>{{ start_time.strftime('%H:%M') }} - {{ end_time.strftime('%H:%M') }} {{ prog_name }} - {{ (summary.total_time*60)|timestamp_custom('%Hh %Mm', False) }}</summary>\n\n{{ event.description if event.description }}\n\n\n\n{% for v in summary.valve -%}\n1) {{ v[0] }} - {{ v[1] }}\n{% endfor %}\n</details>\n\n\n{% endif %}\n{% endfor %}\n{% endif %}\n",
+                  "text_only": true,
+                  "uix": {
+                    "style": {
+                      "ha-markdown$": "details {\n  margin-left: 20px;\n}\n"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "grid",
+              "cards": [
+                {
+                  "type": "horizontal-stack",
+                  "cards": [
+                    {
+                      "type": "gauge",
+                      "entity": "sensor.irrigation_water_monitor_flow",
+                      "max": 15,
+                      "needle": true,
+                      "name": " "
+                    },
+                    {
+                      "type": "gauge",
+                      "name": " ",
+                      "entity": "sensor.irrigation_water_monitor_water_pressure",
+                      "needle": true,
+                      "severity": {
+                        "green": 40,
+                        "yellow": 30,
+                        "red": 0
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "markdown",
+                  "content": "## ⎋ Water Usage\n{% set config = state_attr('sensor.sprinkler_config','programs') %}\n{% for program in config %}\n\n<details><summary>{{ program }}</summary>\n<table width=\"100%\">\n  <tr>\n    <th>Valve</th>\n    <th>Today</th>\n    <th>Month</th>\n  </tr>\n{% for valve in config[program] %}\n  {% set switch = config[program][valve][0] -%}\n  {% set d = 'sensor.daily_irrigation' ~ switch[16:] -%}\n  {% set m = 'sensor.monthly_irrigation' ~ switch[16:] -%}\n  {% set daily = states(d,True,True) -%}\n  {% set monthly = states(m,True,True) -%}\n<tr>\n    <td>{{ valve }}</td>\n    <td>{{ daily if daily != 'unknown' else '?' }}</td>\n    <td>{{ monthly if monthly != 'unknown' else '?' }}</td>\n</tr>\n{% endfor -%}\n</table>\n</details>\n{% endfor %}",
+                  "text_only": true
+                },
+                {
+                  "type": "custom:logbook-card",
+                  "entity": "input_text.sprinkler_log_message",
+                  "hidden_state": [
+                    "None",
+                    "Unknown"
+                  ],
+                  "date_format": "ddd HH:mm:ss",
+                  "group_by_day": true,
+                  "state_map": [
+                    {
+                      "value": "Nothing to run*",
+                      "icon": "mdi:head-question"
+                    },
+                    {
+                      "value": "Reloaded*",
+                      "icon": "mdi:reload"
+                    },
+                    {
+                      "value": "*was included*",
+                      "icon": "mdi:plus-box"
+                    },
+                    {
+                      "value": "*was excluded*",
+                      "icon": "mdi:minus-box"
+                    },
+                    {
+                      "value": "Percent*",
+                      "icon": "mdi:percent"
+                    },
+                    {
+                      "value": "Can not start*",
+                      "icon": "mdi:alert"
+                    },
+                    {
+                      "value": "Schedule was: DISABLED*",
+                      "icon": "mdi:calendar-remove-outline"
+                    },
+                    {
+                      "value": "Schedule was: Enabled*",
+                      "icon": "mdi:calendar-plus-outline"
+                    },
+                    {
+                      "value": "*known*",
+                      "icon": "mdi:head-question"
+                    },
+                    {
+                      "value": "Completed*",
+                      "icon": "mdi:emoticon-happy"
+                    },
+                    {
+                      "value": "Starting valve*",
+                      "icon": "mdi:valve-open"
+                    },
+                    {
+                      "value": "Schedule: Starging*",
+                      "icon": "mdi:clock-start"
+                    },
+                    {
+                      "value": "Starting program*",
+                      "icon": "mdi:animation-play-outline"
+                    },
+                    {
+                      "value": "Pressed Stop*",
+                      "icon": "mdi:stop-circle-outline"
+                    },
+                    {
+                      "value": "Pressed Resume*",
+                      "icon": "mdi:play"
+                    },
+                    {
+                      "value": "Pressed Pause*",
+                      "icon": "mdi:pause-circle"
+                    },
+                    {
+                      "value": "Pressed Skip*",
+                      "icon": "mdi:skip-forward-outline"
+                    },
+                    {
+                      "value": "Stopped*",
+                      "icon": "mdi:close-box-outline"
+                    },
+                    {
+                      "value": "*",
+                      "icon": "mdi:sprinkler"
+                    }
+                  ],
+                  "title": "Logbook",
+                  "grid_options": {
+                    "columns": 12,
+                    "rows": 8
+                  },
+                  "card_mod": {
+                    "style": {
+                      ".": "ha-card {\n  –ha-card-box-shadow: none;\n  background-color: transparent;\n  border-radius: none;\n  border: none;\n}\n"
+                    }
+                  }
+                },
+                {
+                  "type": "entities",
+                  "entities": [
+                    {
+                      "entity": "automation.sprinkler_run_calendar_schedule",
+                      "name": "Enable Schedule",
+                      "tap_action": {
+                        "action": "none"
+                      }
+                    }
+                  ],
+                  "title": "Irrigation Controls",
+                  "card_mod": {
+                    "style": "ha-card {\n  background: none;\n  border: none;\n  box-shadow: none;\n}\n.card-content {\n  padding-bottom: 0px;\n}\n"
+                  }
+                },
+                {
+                  "type": "entities",
+                  "entities": [
+                    {
+                      "entity": "input_datetime.sprinkler_enable_schedule_date",
+                      "name": "Reenable Time"
+                    }
+                  ],
+                  "visibility": [
+                    {
+                      "condition": "state",
+                      "entity": "automation.sprinkler_run_calendar_schedule",
+                      "state": "off"
+                    }
+                  ],
+                  "title": "Enable time",
+                  "card_mod": {
+                    "style": "ha-card {\n  background: none;\n  border: none;\n  box-shadow: none;\n  padding-top: 0px;\n}\n.card-header {\n  font-size: 16px !important;\n  line-height: 20px !important;\n  padding-top: 0px !important;\n  padding-bottom: 0px !important;\n}\n"
+                  }
+                },
+                {
+                  "type": "entities",
+                  "entities": [
+                    {
+                      "entity": "input_number.sprinkler_valve_percent_runtime",
+                      "tap_action": {
+                        "action": "none"
+                      }
+                    },
+                    {
+                      "type": "divider"
+                    },
+                    {
+                      "entity": "sensor.sprinkler_config_issue"
+                    },
+                    {
+                      "entity": "input_button.sprinkler_reload_config_button",
+                      "tap_action": {
+                        "action": "none"
+                      }
+                    }
+                  ],
+                  "card_mod": {
+                    "style": "ha-card {\n  background: none;\n  border: none;\n  box-shadow: none;\n}\n"
+                  }
+                }
+              ]
+            }
+          ],
+          "icon": "mdi:sprinkler",
+          "cards": []
+        },
+        {
+          "title": "Water",
+          "path": "water",
+          "icon": "mdi:water",
+          "cards": [
+            {
+              "type": "entities",
+              "entities": [
+                {
+                  "entity": "sensor.irrigation_water_monitor_flow",
+                  "name": "Flow"
+                },
+                {
+                  "entity": "sensor.irrigation_water_monitor_temperature",
+                  "name": "Temperature"
+                },
+                {
+                  "entity": "sensor.irrigation_water_monitor_water_pressure",
+                  "name": "Water Pressure"
+                },
+                {
+                  "entity": "sensor.irrigation_water_monitor_total"
+                },
+                {
+                  "entity": "sensor.irrigation_water_monitor_half_rotations_total",
+                  "name": "Half Rotations Diag"
+                },
+                {
+                  "entity": "sensor.irrigation_water_monitor_accees_point",
+                  "name": "Meter Access Point",
+                  "icon": "mdi:access-point"
+                },
+                {
+                  "entity": "sensor.irrigation_water_monitor_wifi_signal",
+                  "name": "Irrigation Wifi"
+                },
+                {
+                  "entity": "sensor.esp_24_sprinkler_wifi_signal",
+                  "name": "Controller Wifi"
+                },
+                {
+                  "entity": "select.daily_irrigation",
+                  "name": "Current (daily) Bucket"
+                },
+                {
+                  "entity": "select.monthly_irrigation",
+                  "name": "Current (monthly) Bucket"
+                }
+              ],
+              "title": "Current Irrigation Usage"
+            },
+            {
+              "type": "entities",
+              "entities": [
+                {
+                  "entity": "sensor.daily_irrigation_total",
+                  "name": "Daily Total",
+                  "icon": "mdi:sigma"
+                },
+                {
+                  "entity": "sensor.daily_irrigation_total",
+                  "type": "attribute",
+                  "icon": "mdi:clock-alert-outline",
+                  "attribute": "last_period",
+                  "suffix": "gal",
+                  "name": "Yesterday's Total"
+                },
+                {
+                  "entity": "sensor.monthly_irrigation_total",
+                  "name": "Monthly Total",
+                  "icon": "mdi:sigma"
+                },
+                {
+                  "entity": "sensor.monthly_irrigation_total",
+                  "type": "attribute",
+                  "icon": "mdi:clock-alert-outline",
+                  "attribute": "last_period",
+                  "suffix": "gal",
+                  "name": "Last Month's Total"
+                },
+                {
+                  "entity": "sensor.irrigation_water_monitor_total",
+                  "name": "Total Raw Counter"
+                }
+              ],
+              "state_color": true,
+              "title": "Irrigation Water Usage"
+            },
+            {
+              "chart_type": "bar",
+              "period": "day",
+              "type": "statistics-graph",
+              "entities": [
+                "sensor.irrigation_water_monitor_total"
+              ],
+              "stat_types": [
+                "change"
+              ],
+              "days_to_show": 120
+            },
+            {
+              "chart_type": "bar",
+              "period": "month",
+              "type": "statistics-graph",
+              "entities": [
+                "sensor.irrigation_water_monitor_total"
+              ],
+              "stat_types": [
+                "change"
+              ],
+              "days_to_show": 120
+            },
+            {
+              "chart_type": "line",
+              "period": "hour",
+              "type": "statistics-graph",
+              "entities": [
+                "sensor.irrigation_water_monitor_flow"
+              ],
+              "stat_types": [
+                "max",
+                "mean"
+              ],
+              "days_to_show": 10
+            },
+            {
+              "chart_type": "line",
+              "period": "5minute",
+              "type": "statistics-graph",
+              "entities": [
+                "sensor.irrigation_water_monitor_water_pressure"
+              ],
+              "stat_types": [
+                "min"
+              ],
+              "days_to_show": 1
+            },
+            {
+              "type": "custom:apexcharts-card",
+              "graph_span": "1h",
+              "header": {
+                "show": true,
+                "title": "Irrigation Flow vs. Pressure",
+                "show_states": true,
+                "colorize_states": true
+              },
+              "yaxis": [
+                {
+                  "id": "first",
+                  "decimals": 0,
+                  "apex_config": {
+                    "tickAmount": 4
+                  }
+                },
+                {
+                  "id": "second",
+                  "opposite": true,
+                  "decimals": 0,
+                  "apex_config": {
+                    "tickAmount": 4
+                  }
+                }
+              ],
+              "series": [
+                {
+                  "entity": "sensor.irrigation_water_monitor_flow",
+                  "stroke_width": 1,
+                  "name": "Flow",
+                  "yaxis_id": "first"
+                },
+                {
+                  "entity": "sensor.irrigation_water_monitor_water_pressure",
+                  "stroke_width": 1,
+                  "name": "Pressure",
+                  "yaxis_id": "second"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Daily",
+          "path": "daily",
+          "icon": "mdi:clock-end",
+          "cards": [
+            {
+              "type": "entities",
+              "entities": [
+                {
+                  "entity": "select.daily_irrigation"
+                },
+                {
+                  "entity": "sensor.daily_irrigation_total"
+                },
+                {
+                  "entity": "sensor.daily_irrigation_total",
+                  "type": "attribute",
+                  "icon": "mdi:clock-alert-outline",
+                  "attribute": "last_period",
+                  "suffix": "gal",
+                  "name": "Yesterday's total"
+                },
+                {
+                  "entity": "sensor.daily_irrigation_hose"
+                },
+                {
+                  "entity": "sensor.daily_irrigation_valve_01"
+                },
+                {
+                  "entity": "sensor.daily_irrigation_valve_03"
+                },
+                {
+                  "entity": "sensor.daily_irrigation_valve_07"
+                },
+                {
+                  "entity": "sensor.daily_irrigation_valve_08"
+                },
+                {
+                  "entity": "sensor.daily_irrigation_valve_09"
+                },
+                {
+                  "entity": "sensor.daily_irrigation_valve_10"
+                },
+                {
+                  "entity": "sensor.daily_irrigation_valve_17"
+                },
+                {
+                  "entity": "sensor.daily_irrigation_valve_18"
+                },
+                {
+                  "entity": "sensor.daily_irrigation_valve_19"
+                },
+                {
+                  "entity": "sensor.daily_irrigation_valve_20"
+                },
+                {
+                  "entity": "sensor.daily_irrigation_valve_21"
+                },
+                {
+                  "entity": "sensor.daily_irrigation_valve_23"
+                },
+                {
+                  "entity": "sensor.daily_irrigation_valve_22"
+                },
+                {
+                  "entity": "sensor.daily_irrigation_valve_24"
+                },
+                {
+                  "entity": "sensor.daily_irrigation_valve_25"
+                },
+                {
+                  "entity": "sensor.daily_irrigation_valve_26"
+                },
+                {
+                  "entity": "sensor.daily_irrigation_valve_27"
+                }
+              ]
+            },
+            {
+              "type": "entities",
+              "entities": [
+                {
+                  "entity": "select.monthly_irrigation"
+                },
+                {
+                  "entity": "sensor.monthly_irrigation_total"
+                },
+                {
+                  "entity": "sensor.monthly_irrigation_total",
+                  "type": "attribute",
+                  "icon": "mdi:clock-alert-outline",
+                  "attribute": "last_period",
+                  "suffix": "gal",
+                  "name": "Last Month's Total"
+                },
+                {
+                  "entity": "sensor.monthly_irrigation_hose"
+                },
+                {
+                  "entity": "sensor.monthly_irrigation_valve_01"
+                },
+                {
+                  "entity": "sensor.monthly_irrigation_valve_03"
+                },
+                {
+                  "entity": "sensor.monthly_irrigation_valve_07"
+                },
+                {
+                  "entity": "sensor.monthly_irrigation_valve_08"
+                },
+                {
+                  "entity": "sensor.monthly_irrigation_valve_09"
+                },
+                {
+                  "entity": "sensor.monthly_irrigation_valve_10"
+                },
+                {
+                  "entity": "sensor.monthly_irrigation_valve_17"
+                },
+                {
+                  "entity": "sensor.monthly_irrigation_valve_18"
+                },
+                {
+                  "entity": "sensor.monthly_irrigation_valve_19"
+                },
+                {
+                  "entity": "sensor.monthly_irrigation_valve_20"
+                },
+                {
+                  "entity": "sensor.monthly_irrigation_valve_21"
+                },
+                {
+                  "entity": "sensor.monthly_irrigation_valve_23"
+                },
+                {
+                  "entity": "sensor.monthly_irrigation_valve_22"
+                },
+                {
+                  "entity": "sensor.monthly_irrigation_valve_24"
+                },
+                {
+                  "entity": "sensor.monthly_irrigation_valve_25"
+                },
+                {
+                  "entity": "sensor.monthly_irrigation_valve_26"
+                },
+                {
+                  "entity": "sensor.monthly_irrigation_valve_27"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Yard",
+          "path": "yard",
+          "icon": "mdi:toggle-switch-off-outline",
+          "badges": [],
+          "cards": [
+            {
+              "type": "entities",
+              "entities": [
+                {
+                  "type": "custom:text-divider-row",
+                  "text": "********* USE WITH CAUTION ******"
+                },
+                {
+                  "type": "custom:text-divider-row",
+                  "text": "Back Yard Native Plants"
+                },
+                {
+                  "entity": "switch.sprinkler_valve_01",
+                  "secondary_info": "last-changed"
+                },
+                {
+                  "entity": "switch.sprinkler_valve_20",
+                  "secondary_info": "last-changed"
+                },
+                {
+                  "entity": "switch.sprinkler_valve_24",
+                  "secondary_info": "last-changed"
+                },
+                {
+                  "type": "custom:text-divider-row",
+                  "text": "Rest of back yard"
+                },
+                {
+                  "entity": "switch.sprinkler_valve_03",
+                  "secondary_info": "last-changed"
+                },
+                {
+                  "entity": "switch.sprinkler_valve_08",
+                  "secondary_info": "last-changed"
+                },
+                {
+                  "entity": "switch.sprinkler_valve_19",
+                  "secondary_info": "last-changed"
+                },
+                {
+                  "type": "custom:text-divider-row",
+                  "text": "Front of House"
+                },
+                {
+                  "entity": "switch.sprinkler_valve_18",
+                  "secondary_info": "last-changed"
+                },
+                {
+                  "entity": "switch.sprinkler_valve_27",
+                  "secondary_info": "last-changed"
+                },
+                {
+                  "entity": "switch.sprinkler_valve_07",
+                  "secondary_info": "last-changed"
+                },
+                {
+                  "entity": "switch.sprinkler_valve_21",
+                  "icon": "mdi:sprout",
+                  "secondary_info": "last-changed"
+                }
+              ],
+              "title": "Drip Irrigation",
+              "show_header_toggle": false,
+              "state_color": true
+            },
+            {
+              "type": "entities",
+              "entities": [
+                {
+                  "type": "custom:text-divider-row",
+                  "text": "********* USE WITH CAUTION ******"
+                },
+                {
+                  "type": "custom:text-divider-row",
+                  "text": "Medow Grass & Lawn"
+                },
+                {
+                  "entity": "switch.sprinkler_valve_17",
+                  "secondary_info": "last-changed"
+                },
+                {
+                  "entity": "switch.sprinkler_valve_26",
+                  "secondary_info": "last-changed"
+                },
+                {
+                  "entity": "switch.sprinkler_valve_25",
+                  "secondary_info": "last-changed"
+                },
+                {
+                  "type": "custom:text-divider-row",
+                  "text": "Tall Heads East hill"
+                },
+                {
+                  "entity": "switch.sprinkler_valve_22",
+                  "secondary_info": "last-changed"
+                },
+                {
+                  "entity": "switch.sprinkler_valve_23",
+                  "secondary_info": "last-changed"
+                },
+                {
+                  "entity": "switch.sprinkler_valve_09",
+                  "secondary_info": "last-changed"
+                },
+                {
+                  "entity": "switch.sprinkler_valve_10",
+                  "secondary_info": "last-changed"
+                }
+              ],
+              "title": "Sprinklers",
+              "show_header_toggle": false,
+              "state_color": true
+            }
+          ]
+        },
+        {
+          "title": "Unused",
+          "path": "unused",
+          "icon": "mdi:fire-off",
+          "cards": [
+            {
+              "type": "entities",
+              "entities": [
+                {
+                  "entity": "switch.sprinkler_valve_02",
+                  "name": "Horseshoe Pit (2)"
+                },
+                {
+                  "entity": "switch.sprinkler_valve_04",
+                  "name": "Yellow (4)"
+                },
+                {
+                  "entity": "switch.sprinkler_valve_05",
+                  "name": "Orange (5)"
+                },
+                {
+                  "entity": "switch.sprinkler_valve_06",
+                  "name": "Brown (6)"
+                },
+                {
+                  "entity": "switch.sprinkler_valve_11"
+                },
+                {
+                  "entity": "switch.sprinkler_valve_12"
+                },
+                {
+                  "entity": "switch.sprinkler_valve_13"
+                },
+                {
+                  "entity": "switch.sprinkler_valve_14"
+                },
+                {
+                  "entity": "switch.sprinkler_valve_15"
+                },
+                {
+                  "entity": "switch.sprinkler_valve_16"
+                }
+              ],
+              "title": "Unused on ESP-24",
+              "show_header_toggle": false
+            }
+          ]
+        },
+        {
+          "type": "sections",
+          "max_columns": 4,
+          "title": "Water Usage",
+          "path": "water-usage",
+          "icon": "mdi:gauge",
+          "sections": [
+            {
+              "type": "grid",
+              "cards": [
+                {
+                  "type": "heading",
+                  "heading": "New section"
+                },
+                {
+                  "type": "markdown",
+                  "content": "## Water Usage\n{% set config = state_attr('sensor.sprinkler_config','programs') %}\n{% for program in config %}\n\n<details><summary>{{ program }}</summary>\n<table width=\"100%\">\n  <tr>\n    <th>Valve</th>\n    <th>Today</th>\n    <th>Month</th>\n  </tr>\n{% for valve in config[program] %}\n  {% set switch = config[program][valve][0] -%}\n  {% set d = 'sensor.daily_irrigation' ~ switch[16:] -%}\n  {% set m = 'sensor.monthly_irrigation' ~ switch[16:] -%}\n  {% set daily = states(d,True,True) -%}\n  {% set monthly = states(m,True,True) -%}\n<tr>\n    <td>{{ valve }}</td>\n    <td>{{ daily if daily != 'unknown' else '-' }}</td>\n    <td>{{ monthly if monthly != 'unknown' else '?' }}</td>\n</tr>\n{% endfor -%}\n</table>\n</details>\n{% endfor %}"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
