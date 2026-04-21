@@ -1,8 +1,13 @@
 # Sprinkler/Irrigation - for Home Assistant
 
 ## Overview
-This is a set of YAML *packages* for running Irrigation programs. It is based off of one of the more
-common Irrigation integrations. 
+This is a set of YAML *packages* for running Irrigation programs. It is roughtly based off of one of the more
+common Irrigation integrations. There were bugs in that integration (e.g. could not turn off valves at time!)
+and wanted to be able to easily customize for my own use.
+
+I've been moving more integrations into packages because HA really provides all the tools necessary to do many
+things that integrations provide, and can group all needed automations, scripts, helpers and template into a single
+file or directory.
 
 * Valves are the physical switch to turn on or off an irrigatoin valve
 * Programs are collections of valves, with either a default runtime or specific runtime for each valve
@@ -65,6 +70,9 @@ To Do:
 
 </details>
 
-**Concepts
+## Concepts
+
+
+
 
 
