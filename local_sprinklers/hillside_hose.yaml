@@ -1,0 +1,14 @@
+template:
+
+  # Create a button to turn on the east hillside hose program for a short amount of time.
+  - button:
+      - name: "Hillside Hose"
+        default_entity_id: button.hillside_hose
+        unique_id: sprinkler_run_hillside_hose_id
+        availability: "{{ is_state('timer.sprinkler_valve_time', 'idle') }}"
+        icon: mdi:watering-can
+        press:
+          - action: script.sprinkler_run_program
+            data:
+              program_name: 'The Hose on the Hill'
+

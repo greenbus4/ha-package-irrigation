@@ -1,0 +1,608 @@
+#
+# Entities for monitoring the irrigation system
+# These are specific to my specific irrigation system.
+#
+
+template:
+
+  # Binary Sensor that returns true if more than one sprinkler valve is on at the same time.
+  # Used in automation below to generate a warning.
+  - binary_sensor:
+      - name: 'Multiple Sprinkler Valves Open'
+        unique_id: multiple_sprinkler_values_open
+        state: >
+          {{ 
+            label_entities("Sprinkler Valve")
+            | select('is_state', 'on')
+            | list
+            | count > 1
+          }}
+
+
+
+# -------------- These track daily useage and usage by valve ------------------
+#  See the following automation that swaps which "tariff" to use at any give time
+#
+
+utility_meter:
+
+  daily_irrigation_total:
+    unique_id: daily_irrigation_water_total
+    source: sensor.irrigation_water_monitor_total
+    name: Daily Irrigation Total
+    cycle: daily
+
+
+  daily_irrigation:
+    unique_id: daily_irrigation_water
+    source: sensor.irrigation_water_monitor_total
+    name: Daily Irrigation
+    cycle: daily
+    tariffs:
+      - hose
+      - valve_01
+      - valve_02
+      - valve_03
+      - valve_04
+      - valve_05
+      - valve_06
+      - valve_07
+      - valve_08
+      - valve_09
+      - valve_10
+      - valve_11
+      - valve_12
+      - valve_13
+      - valve_14
+      - valve_15
+      - valve_16
+      - valve_17
+      - valve_18
+      - valve_19
+      - valve_20
+      - valve_21
+      - valve_22
+      - valve_23
+      - valve_24
+      - valve_25
+      - valve_26
+      - valve_27
+
+  monthly_irrigation_total:
+    unique_id: monthly_irrigation_water_total
+    source: sensor.irrigation_water_monitor_total
+    name: Monthly Irrigation Total
+    cycle: monthly
+
+  monthly_irrigation:
+    unique_id: monthly_irrigation_water
+    source: sensor.irrigation_water_monitor_total
+    name: Monthly Irrigation
+    cycle: monthly
+    tariffs:
+      - hose
+      - valve_01
+      - valve_02
+      - valve_03
+      - valve_04
+      - valve_05
+      - valve_06
+      - valve_07
+      - valve_08
+      - valve_09
+      - valve_10
+      - valve_11
+      - valve_12
+      - valve_13
+      - valve_14
+      - valve_15
+      - valve_16
+      - valve_17
+      - valve_18
+      - valve_19
+      - valve_20
+      - valve_21
+      - valve_22
+      - valve_23
+      - valve_24
+      - valve_25
+      - valve_26
+      - valve_27
+
+automation:
+
+  #------- Set the utility meter tarrifs based on which valve is open -------
+  - id: sprinkler_set_tariff_value_id
+    alias: 'Utility: Set tariff valve for irrigation'
+    mode: queued
+    max: 25
+    description: |-
+
+      This automation works in conjunction with the utility meter helper
+      integration. See: https://www.home-assistant.io/integrations/utility_meter/
+
+      This sets the current "tariff" when a switch/valve is turned on to track
+      water by valve, and then resets it to "hose" when a switch turns off.
+
+      This depends on the events coming in in the right order. e.g. valve_05
+      turns on and sets the tariff to "valve_05", then it turns off setting back to
+      default "hose", then the next valve turns on and sets the new tariff to
+      its valve number.
+
+      Therefore, the script mode is set to "queued"
+
+      Not quite sure if there's any behavior needed for state Unavailable. For
+      now, just ignore, but still logs the event.
+
+      There's a delay of 15s when a valve is turned off to catch the last
+      update from the meter sensor (also updates ever 15s).
+      (Note: the valves are configured to have a 30s delay between them)
+
+      Set max high to suppress "Set tariff valve for irrigation: Maximum number
+      of runs exceeded" but the problem is this is called at startup for all
+      entities, so needs attention to deal with that.
+      Maybe just look at from [on,off] to the same.
+
+    triggers:
+      - entity_id:
+          - switch.sprinkler_valve_01
+          - switch.sprinkler_valve_02
+          - switch.sprinkler_valve_03
+          - switch.sprinkler_valve_04
+          - switch.sprinkler_valve_05
+          - switch.sprinkler_valve_06
+          - switch.sprinkler_valve_07
+          - switch.sprinkler_valve_08
+          - switch.sprinkler_valve_09
+          - switch.sprinkler_valve_10
+          - switch.sprinkler_valve_11
+          - switch.sprinkler_valve_12
+          - switch.sprinkler_valve_13
+          - switch.sprinkler_valve_14
+          - switch.sprinkler_valve_15
+          - switch.sprinkler_valve_16
+          - switch.sprinkler_valve_17
+          - switch.sprinkler_valve_18
+          - switch.sprinkler_valve_19
+          - switch.sprinkler_valve_20
+          - switch.sprinkler_valve_21
+          - switch.sprinkler_valve_22
+          - switch.sprinkler_valve_23
+          - switch.sprinkler_valve_24
+          - switch.sprinkler_valve_25
+          - switch.sprinkler_valve_26
+          - switch.sprinkler_valve_27
+        trigger: state
+        to:
+          - "on"
+          - "off"
+    actions:
+      - alias: Determine which tariff to set
+        variables:
+          new_tariff: |-
+            {% if is_state( trigger.entity_id, 'off' ) %}
+              hose
+            {% elif is_state( trigger.entity_id, 'on' ) %}
+              {{ trigger.entity_id.replace( 'switch.sprinkler_', '' ) }}
+            {% else %}
+              none
+            {% endif %}
+      - alias: >-
+          There is a little flow after the valve turns off, so wait a short
+          amount of time before updating the teriff name so that the flow is
+          counted for the last valve.
+        if:
+          - condition: template
+            value_template: "{{ is_state( trigger.entity_id, 'off' ) }}"
+        then:
+          - delay:
+              hours: 0
+              minutes: 0
+              seconds: 2
+              milliseconds: 0
+      - alias: Set the tariff on the meters.
+        if:
+          - condition: template
+            value_template: "{{ is_state( trigger.entity_id, ['on','off'] ) }}"
+        then:
+          - action: select.select_option
+            target:
+              entity_id:
+                - select.monthly_irrigation
+                - select.daily_irrigation
+            data:
+              option: '{{ new_tariff }}'
+      - alias: Track the current starting gallons for use in another automation
+        if:
+          - condition: template
+            value_template: "{{ is_state( trigger.entity_id, ['on'] ) }}"
+        then:
+          - action: input_text.set_value
+            data:
+              value: >-
+                {{ new_tariff + ':' + states('sensor.irrigation_water_monitor_total') }}
+            target:
+              entity_id: input_text.irrigation_starting_gallons
+      - alias: Finally, write a log of which tariff is set.
+        action: notify.send_message
+        data:
+          message: |-
+            {{ trigger.entity_id }}: '{{ trigger.from_state.state }}' => '{{ trigger.to_state.state }}'
+            Tariff='{{ new_tariff }}'
+            Current monthly/daily='{{ states('select.monthly_irrigation') }}/{{ states('select.daily_irrigation') }}'
+
+        target:
+          entity_id: notify.sprinkler_log
+
+
+  # ------------------ Check for the water meter to be unavailable ----------------
+  - id: water_meter_unavailable_id
+    alias: 'Notify: Water meter unavailable'
+    mode: single
+    trigger:
+      - platform: state
+        entity_id:
+          - sensor.irrigation_water_monitor_total
+        to: unavailable
+        for:
+          hours: 0
+          minutes: 1
+          seconds: 0
+    condition: []
+    action:
+      - action: notify.bill
+        metadata: {}
+        data:
+          message: Water Meter became unavailable
+
+
+  # -------------- Check for a valve on a long time ---------------
+  - id: irrigation_valve_left_on
+    alias: 'Alert: Irrigation Valve Left On'
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id:
+          - switch.any_sprinkler_valve_open
+        to: 'on'
+        for:
+          hours: 2
+          minutes: 0
+          seconds: 0
+    conditions: []
+    actions:
+      - action: script.notify_irrigation_problem
+        metadata: {}
+        data:
+          message: >
+            Sprinkler Stuck? Check if {{
+            expand('switch.any_sprinkler_valve_open')|selectattr('state','eq',
+            'on')|map(attribute='name')|list|join("\n") }} should still be
+            running.
+
+
+  # ------- Check for high water usage ------------------------
+  - id: notifiy_hight_water_usage
+    alias: 'Irrigation: Notify high water usage.'
+    mode: single
+    description: |-
+      This needs updating. Should turn OFF the irrigation if we think there's
+      a leak. But, it should look at if any irrigation is running first OR? if
+      any valve is open.
+
+    triggers:
+      - trigger: numeric_state
+        entity_id:
+          - sensor.irrigation_water_monitor_flow
+        for:
+          hours: 0
+          minutes: 10
+          seconds: 0
+        above: 14
+    conditions: []
+    actions:
+      - if:
+          - condition: state
+            entity_id: select.daily_irrigation
+            state: hose
+        then:
+          - action: script.notify_irrigation_problem
+            metadata: {}
+            data:
+              message: >-
+                High water usage rate @ {{
+                states('sensor.irrigation_water_monitor_flow') }} gal/min
+        else:
+          - action: script.notify_irrigation_problem
+            metadata: {}
+            data:
+              message: >-
+                Sprinkler water usage rate @ {{
+                states('sensor.irrigation_water_monitor_flow') }} gal/min for
+                station: "{{ states('select.daily_irrigation') }}". Irrigation
+                controller DISABLED.
+          - action: switch.turn_off
+            entity_id: switch.sprinkler_master_switch
+
+
+
+  # ---------------- Watch for low water pressure ----------------------
+  - id: irrigation_low_water_pressure_id
+    alias: Irrigation low water pressure.
+    mode: queued
+    triggers:
+      - trigger: numeric_state
+        entity_id:
+          - sensor.irrigation_water_monitor_water_pressure
+        for:
+          hours: 0
+          minutes: 5
+          seconds: 0
+        below: 30
+        id: low_pressure
+      - trigger: numeric_state
+        entity_id:
+          - sensor.irrigation_water_monitor_water_pressure
+        for:
+          hours: 0
+          minutes: 10
+          seconds: 0
+        above: 35
+        id: water_pressure_restored
+    conditions: []
+    actions:
+      - variables:
+          current_psi: >-
+            {{ states('sensor.irrigation_water_monitor_water_pressure',
+            with_unit=True) }}
+      - if:
+          - condition: trigger
+            id: low_pressure
+        then:
+          - action: switch.turn_off
+            entity_id: switch.sprinkler_master_switch
+          - action: script.notify_irrigation_problem
+            data:
+              message: Sprinklers were disabled due to low pressure.
+        else:
+          - if:
+              - condition: state
+                entity_id: switch.sprinkler_master_switch
+                state: 'off'
+            then:
+              - action: switch.turn_on
+                entity_id: switch.sprinkler_master_switch
+              - action: script.notify_irrigation_problem
+                data:
+                  message: Sprinkler pressure restored.
+
+
+  # --------- Alert if multiple valves are open ------------------
+  - id: alert_on_multiple_valves_on_id
+    alias: 'Alert: Multiple Irrigation Valves Open'
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id:
+          - binary_sensor.multiple_sprinkler_valves_open
+        to: 'on'
+    conditions: []
+    actions:
+      - variables:
+          currently_on: |-
+            {{
+              label_entities("Sprinkler Valve")
+              | select('is_state', 'on' )
+              | expand
+              | map(attribute='name')
+              | join("\n")
+            }}
+      - action: script.notify_irrigation_problem
+        metadata: {}
+        data:
+          message: |-
+            It appears that more than one sprinkler valve is currently open:
+            {{ currently_on }}.
+
+
+
+  # ------------------ Look for unexpected flow per-valve -----------------
+  # Initially set these in customize.yaml. Would be nice to be able to set attributes
+  # on the switches from the UI.
+  # The TODO here is to move all this into a "meta" sensor that stores this (and default runtime and schedule)
+  # as attribures.
+
+  - id: monitor_irrigation_flow_per_valve_id
+    alias: Monitor Irrigation Flow per Valve
+    mode: queued
+    triggers:
+      - trigger: state
+        entity_id:
+          - switch.sprinkler_valve_01
+          - switch.sprinkler_valve_02
+          - switch.sprinkler_valve_03
+          - switch.sprinkler_valve_04
+          - switch.sprinkler_valve_05
+          - switch.sprinkler_valve_06
+          - switch.sprinkler_valve_07
+          - switch.sprinkler_valve_08
+          - switch.sprinkler_valve_09
+          - switch.sprinkler_valve_10
+          - switch.sprinkler_valve_11
+          - switch.sprinkler_valve_12
+          - switch.sprinkler_valve_13
+          - switch.sprinkler_valve_14
+          - switch.sprinkler_valve_15
+          - switch.sprinkler_valve_16
+          - switch.sprinkler_valve_17
+          - switch.sprinkler_valve_18
+          - switch.sprinkler_valve_19
+          - switch.sprinkler_valve_20
+          - switch.sprinkler_valve_21
+          - switch.sprinkler_valve_22
+          - switch.sprinkler_valve_23
+          - switch.sprinkler_valve_24
+          - switch.sprinkler_valve_25
+          - switch.sprinkler_valve_26
+          - switch.sprinkler_valve_27
+        to: 'on'
+        for:
+          hours: 0
+          minutes: 15
+          seconds: 0
+    conditions: []
+    actions:
+      - variables:
+          flow_rate:
+            switch.sprinkler_valve_01: 0.77
+            switch.sprinkler_valve_02: 0
+            switch.sprinkler_valve_03: 3.81
+            switch.sprinkler_valve_04: 0
+            switch.sprinkler_valve_05: 0
+            switch.sprinkler_valve_06: 0
+            switch.sprinkler_valve_07: 1.22
+            switch.sprinkler_valve_08: 2.7
+            switch.sprinkler_valve_09: 0
+            switch.sprinkler_valve_10: 0
+            switch.sprinkler_valve_11: 0
+            switch.sprinkler_valve_12: 0
+            switch.sprinkler_valve_13: 0
+            switch.sprinkler_valve_14: 0
+            switch.sprinkler_valve_15: 0
+            switch.sprinkler_valve_16: 0
+            switch.sprinkler_valve_17: 11.65
+            switch.sprinkler_valve_18: 4.16
+            switch.sprinkler_valve_19: 2.99
+            switch.sprinkler_valve_20: 2.57
+            switch.sprinkler_valve_21: 1.49
+            switch.sprinkler_valve_22: 0
+            switch.sprinkler_valve_23: 0
+            switch.sprinkler_valve_24: 2.84
+            switch.sprinkler_valve_25: 8.48
+            switch.sprinkler_valve_26: 8.91
+            switch.sprinkler_valve_27: 4.09
+          valve: '{{ trigger.entity_id }}'
+          expected_rate: '{{ flow_rate[valve] if valve in flow_rate else 0 }}'
+          current_flow: >-
+            {%- set start_value = states('input_text.irrigation_starting_gallons' ) %}
+            {%- if valve[17:]+':' in start_value %}
+              {%- set v,g = start_value.split(':') %}
+              {%- set gals_used = states('sensor.irrigation_water_monitor_total')|float - g|float %}
+              {%- set total_secs = (now() - states.input_text.irrigation_starting_gallons.last_changed).total_seconds() %}
+              {{ gals_used/total_secs*60 }}
+            {%- else -%}
+              {{ states('sensor.irrigation_water_monitor_flow' ) }}
+            {%- endif %}
+          flow_difference: '{{ current_flow|float - expected_rate|float }}'
+          friendly_name: "{{ entity_name( valve )}}"
+          percent_limit: 15
+          range_limit: '{{ expected_rate|float * (percent_limit/100) }}'
+          flow_fmt: '%.2f g/m'
+      - if:
+          - condition: template
+            value_template: >-
+              {{ not valve[17:]+':' in states('input_text.irrigation_starting_gallons' ) }}
+        then:
+          - action: persistent_notification.create
+            data:
+              message: >-
+                Warning: Expected to find {{ valve }} in
+                input_text.irrigation_starting_gallons
+
+                but instead found "{{
+                states('input_text.irrigation_starting_gallons' ) }}".
+
+                Will use the current flow of {{ flow_fmt % current_flow }}.
+      - if:
+          - condition: template
+            value_template: '{{ flow_difference|abs > range_limit }}'
+        then:
+          - alias: Notify pump turned off prematurely
+            action: persistent_notification.create
+            metadata: {}
+            data:
+              title: Irrigation Issue
+              message: >-
+                Flow for valve "{{ valve }}" ( {{ friendly_name }} ) is
+                currently at {{ flow_fmt % current_flow }} but expected {{
+                flow_fmt % expected_rate }} g/m which is off by {{ flow_fmt %
+                flow_difference }} and that exceeds the allowable {{
+                percent_limit }}% difference.
+
+                Maybe update the [Automation](/config/automation/edit/{{
+                this.attributes.id }}) to {{ flow_fmt % current_flow }}.
+      - alias: Finally, write a log entry of the current flow for the valve.
+        action: notify.send_message
+        metadata: {}
+        data:
+          message: 'Water Usage:        {{ valve }}: {{ flow_fmt % current_flow }}'
+        target:
+          entity_id: notify.sprinkler_log
+
+
+
+  # ------------- Is water running at 4am? ---------------------
+  # Why have this??
+  - id: water_running_at_odd_hour_id
+    alias: 'Irrigation: Water usage at 4am?'
+    mode: single
+    description: >-
+      Probably should just trigger at 4am and see if water is running. And use a
+      utility meter to count gallons over last hour.
+    triggers:
+      - trigger: numeric_state
+        entity_id:
+          - sensor.irrigation_water_monitor_flow
+        for:
+          hours: 0
+          minutes: 2
+          seconds: 0
+        above: 0.8
+    conditions:
+      - condition: time
+        after: '03:00:00'
+        before: '04:00:00'
+    actions:
+      - action: persistent_notification.create
+        metadata: {}
+        data:
+          message: Check why water was running at night
+          title: Irrigation Issue
+      - action: notify.bill
+        metadata: {}
+        data:
+          message: Check why water was running early in the morning.
+
+script:
+
+  notify_irrigation_problem:
+    alias: Notify irrigation problem
+    fields:
+      message:
+        selector:
+          text: null
+        name: message
+        description: Enter the irrigation alert message
+        required: true
+    sequence:
+      - variables:
+          stats: |-
+            {{ message }}
+
+            Current pressure is {{ states('sensor.irrigation_water_monitor_water_pressure', True, True ) }}
+            and flow is {{ states('sensor.irrigation_water_monitor_flow', True, True) }}.
+      - alias: Notify our phones of the issue
+        action: notify.our_phones
+        data:
+          message: "{{ stats }}"
+          title: Irrigation Issue
+      - alias: Set a persistent notification
+        action: notify.persistent_notification
+        metadata: {}
+        data:
+          title: Irrigation Issue
+          message: "{{ stats }}"
+    mode: single
+    icon: mdi:alert
+    description: ""
+
