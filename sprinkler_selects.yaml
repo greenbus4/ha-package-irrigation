@@ -115,6 +115,10 @@ template:
       - trigger: state
         entity_id: input_text.sprinkler_program
 
+    variables:
+      default: "{{ [ states('input_text.sprinkler_select_default_text') ] }}"
+      programs: "{{ state_attr('sensor.sprinkler_config','programs').keys()|list }}"
+
     actions:
 
       - if:
@@ -146,10 +150,6 @@ template:
         unique_id: select_sprinkler_program_id
         icon: mdi:format-list-group
         optimistic: true
-        variables:
-          default: "{{ [ states('input_text.sprinkler_select_default_text') ] }}"
-          programs: "{{ state_attr('sensor.sprinkler_config','programs').keys()|list }}"
-
         state: "{{ states('input_text.sprinkler_program') }}"
         options: "{{ default + programs }}"
         select_option:
@@ -175,8 +175,18 @@ template:
         entity_id: input_text.sprinkler_valve
 
 
+    variables:
+      default: "{{ states('input_text.sprinkler_select_default_text') }}"
+      cur_program: "{{ states('input_text.sprinkler_program') }}"
+      cur_valve: "{{ states('input_text.sprinkler_valve') }}"
+      programs: "{{ state_attr('sensor.sprinkler_config','programs') }}"
+      sel_opts: "{{ [default] + programs[cur_program].keys()|list if cur_program in programs else [default] }}"
 
     actions:
+      - action: system_log.write
+        data:
+          message: Opts = {{ (['Opts='] + sel_opts)|join("\n") }}
+
       - if:
           - condition: trigger
             id: program_changed
@@ -207,15 +217,10 @@ template:
         # the "select_option" below runs an that updates 'input_text.sprinkler_valve'
         # which is one of the triggers, and then that would cause "state" to be processed below.
         optimistic: false
-        variables:
-          default: "{{ states('input_text.sprinkler_select_default_text') }}"
-          cur_program: "{{ states('input_text.sprinkler_program') }}"
-          cur_valve: "{{ states('input_text.sprinkler_valve') }}"
-          programs: "{{ state_attr('sensor.sprinkler_config','programs') }}"
 
-        options: "{{ [default] + programs[cur_program].keys()|list if cur_program in programs else [default] }}"
         state: "{{ cur_valve }}"
         availability: "{{ not is_state('input_text.sprinkler_program', default ) }}"
+        options: "{{ sel_opts }}"
         select_option:
           - action: input_text.set_value
             target:
