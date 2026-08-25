@@ -104,3 +104,49 @@ automation:
       - action: automation.turn_on
         target:
           entity_id: automation.sprinkler_run_calendar_schedule
+
+
+script:
+
+  # This script is called to run a program (from an automation)
+  # and it verifies that the program and valve are valid.
+  # It then triggers an event to load the required schedule.
+  # NOTE: Why do this when called from an automation (e.g. a schedule)
+  # but not when a button is pressed to run a program or valve? Does that make sense?
+
+  sprinkler_run_program:
+    alias: Validates and runs a program passed in the program_name field
+    variables:
+      programs: "{{ state_attr('sensor.sprinkler_config', 'programs' ).keys()|list }}"
+    fields:
+      program_name:
+        name: Enter a valid (configured) program name
+        required: true
+        example: "Native Plant drips"
+        selector:
+          text:
+    sequence:
+      - choose:
+          - conditions: "{{ program_name not in programs }}"
+            sequence:
+              - action: persistent_notification.create
+                data:
+                  title: Sprinkler Error
+                  message: 'Attempted to run an invalid or disabled sprinkler program "{{ program_name }}" Options="{{ programs }}"'
+              - stop: 'Provided program name "{{ program_name }}" is not a currently available program.'
+                error: true
+
+          # Sure, a bit of a race here if this happens between valves.
+          - conditions: "{{ not is_state('timer.sprinkler_valve_time', 'idle') }}"
+            sequence:
+              - action: persistent_notification.create
+                data:
+                  title: Sprinkler Error
+                  message: 'Attempted to run sprinkler program "{{ program_name }}, but sprinklers are running.'
+        default:
+          - event: sprinkler_schedule_run_program
+            event_data:
+              program: "{{ program_name }}"
+
+
+

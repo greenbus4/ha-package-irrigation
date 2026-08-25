@@ -1,0 +1,302 @@
+#
+# Code to:
+#   - Build the queue
+#   - Exclude/Include valves
+#   - Some extra UI helpers
+#
+#==================================================================================
+
+# ---------- Things to exclude from database --------------
+recorder:
+  exclude:
+    entities:
+      - input_number.sprinkler_queue_position
+      - sensor.sprinkler_exclude_list
+      - sensor.sprinkler_program_summary
+      - binary_sensor.sprinkler_valve_is_excluded
+
+logbook:
+  exclude:
+    entities:
+      - input_number.sprinkler_queue_position
+      - sensor.sprinkler_exclude_list
+      - sensor.sprinkler_program_summary
+      - binary_sensor.sprinkler_valve_is_excluded
+
+
+
+template:
+
+  # ====================== QUEUE ==========================================
+
+  # ---------- Two buttons to add either a program or a single valve to the queue
+  # Beacuse using is_state() should never match "unknown".
+  # FIXME: remove the other 'unknown' from the run valve
+
+  - button:
+      - name: Sprinkler run program
+        default_entity_id: button.sprinkler_run_program
+        unique_id: sprinkler_run_program_button_id
+        availability: >
+          {{
+            not (is_state('select.sprinkler_program', ['unavailable', states('input_text.sprinkler_select_default_text')] )
+            or is_state('timer.sprinkler_valve_time', ['paused','active']))
+          }}
+        press:
+          - stop: End
+
+
+      - name: Sprinkler run valve
+        default_entity_id: button.sprinkler_run_valve
+        unique_id: sprinkler_run_valve_id
+        availability: >
+          {{
+            not (
+              is_state('select.sprinkler_valve', ['unknown', 'unavailable', states('input_text.sprinkler_select_default_text')] )
+              or is_state('timer.sprinkler_valve_time', ['paused','active'])
+              or states('input_number.sprinkler_valve_minutes')|int(0) == 0
+            )
+          }}
+        press:
+          - stop: End
+
+
+  ######## Clear/Remove comments ##########
+  # This template saves of the queue with updated run times.
+  # It is triggered either by the buttons to run a program or valve, or
+  # via a direct event to load a program.
+  # The state is the current time and the running of the "queue" is triggered when
+  # the state is changed.
+  # QUESTION: does the state changed event happen before the code updates the attributes?
+  # Finding user:
+  #   button action => trigger.to_state.context.user_id
+  #   button that triggers another script: trigger.event.context.parent_id => caller's ID
+  #   timer: parent and user ids are null. But you can see trigger.platform == 'time'
+  #   Manually fire event from dev console: trigger.event.context.user_id
+  #   BUT -- those are the direct triggers. An automation that triggers and then calls this (via event)
+  #   will NOT have the context to show where it came from.
+  #   NOT EVEN the parent_id!
+
+  #-------------- Load the queue -----------------------------
+  # This doesn't start the queue -- the runner watches for changes to this entity
+  # Only add valves that have > 0 minutes.
+
+  - triggers:
+      - trigger: state
+        entity_id:
+          - button.sprinkler_run_program
+          - button.sprinkler_run_valve
+        not_to:
+          - unavailable
+          - unknown
+        not_from:
+          - unavailable
+        id: button_press
+
+      - trigger: event
+        event_type: sprinkler_schedule_run_program
+        id: set_queue
+
+    actions:
+      - variables:
+          single: "{{ false if trigger.id == set_queue else trigger.entity_id == 'button.sprinkler_run_valve' }}"
+          percent: "{{ states('input_number.sprinkler_valve_percent_runtime')|int(0) }}"
+          progs: "{{ state_attr('sensor.sprinkler_config', 'programs' ) }}"
+          exclude_list: "{{ state_attr('sensor.sprinkler_exclude_list','list') }}"
+          m: "{{ states('input_number.sprinkler_valve_minutes') }}"
+          p: "{{ trigger.event.data.program if trigger.id == 'set_queue' else states('select.sprinkler_program' ) }}"
+          v: "{{ states('select.sprinkler_valve') }}"
+          q: |-
+            {{
+                [progs[p][v]] if single and p in progs and v in progs[p]
+                else progs[p].values()|list if not single and p in progs
+                else []
+            }}
+          valves: |-
+            {% set ns = namespace(valves=[]) %}
+            {% for v in q -%}
+              {% set min = m|int(0) if single else (v[1]|int(0) * percent / 100)|int(0) -%}
+              {% if min and (single or not v[0] in exclude_list) -%}
+                {% set ns.valves = ns.valves + [ [v[0], min] ] -%}
+              {% endif -%}
+            {% endfor %}
+            {{ ns.valves }}
+
+          # This doesn't cover all the cases. Like if triggered by an event in the UI, where there would be a user_id available.
+          user: |-
+            {{
+              'Schedule' if trigger.id == 'set_queue' 
+              else 
+                states.person 
+                | selectattr( "attributes.user_id", "==", trigger.to_state.context.user_id)
+                | map(attribute="attributes.friendly_name")
+                | first
+            }}
+      - action: script.sprinkler_log_message
+        data:
+          user:  "{{ user }}"
+          message: |-
+            {{ 
+              'Nothing to run as all valves have no times' if not valves|length else
+              'Starting valve "' ~ v ~ '"' if single else
+              'Starting program "' ~ p ~ '"'
+            }}
+
+    sensor:
+      - name: Sprinkler Queue
+        unique_id: sprinkler_queue_id
+        state: "{{ now() }}"
+        attributes:
+          queue: "{{ valves }}"
+          prog: "{{ p }}"
+          valve: "{{ v }}"
+          user: "{{ user }}"
+
+
+  # ====================== EXCLUDE LIST ==========================================
+
+  # ------- Two buttons for excluding an including valves
+  # Could this be a toggle instead of two buttons?
+  # No validation is here.
+  - button:
+      - name: Sprinkler Exclude Valve
+        default_entity_id: button.sprinkler_exclude_valve
+        unique_id: sprinkler_exclude_valve_id
+        availability: "{{ not is_state('binary_sensor.sprinkler_valve_is_excluded', ['unavailable','on']) }}"
+        press:
+          - event: sprinkler_exclude_valve
+
+          - action: script.sprinkler_log_message
+            data:
+              message: "Valve '{{ entity_name(state_attr('binary_sensor.sprinkler_valve_is_excluded','cur_valve_entity')) }}' was excluded"
+              user: |-
+                {{
+                  states.person 
+                  | selectattr( "attributes.user_id", "==", context.user_id)
+                  | map(attribute="attributes.friendly_name")
+                  | first
+                }}
+
+
+      - name: Sprinkler Include Valve
+        default_entity_id: button.sprinkler_include_valve
+        unique_id: sprinkler_include_valve_id
+        availability: "{{ not is_state('binary_sensor.sprinkler_valve_is_excluded', ['unavailable','off']) }}"
+        press:
+          - event: sprinkler_include_valve
+          - action: script.sprinkler_log_message
+            data:
+              message: "Valve '{{ entity_name(state_attr('binary_sensor.sprinkler_valve_is_excluded','cur_valve_entity')) }}' was included"
+              user: |-
+                {{
+                  states.person 
+                  | selectattr( "attributes.user_id", "==", context.user_id)
+                  | map(attribute="attributes.friendly_name")
+                  | first
+                }}
+
+  # ------ This template adds or removes an entity_id from the exclude list
+  - triggers:
+      - trigger: event
+        event_type: sprinkler_exclude_valve
+        id: exclude
+      - trigger: event
+        event_type: sprinkler_include_valve
+        id: include
+      - trigger: event
+        event_type: sprinkler_clear_exclude_list
+        id: clear
+
+    sensor:
+      - name: Sprinkler Exclude List
+        state: "{{ now() }}"
+        attributes:
+          list: |-
+            {% set list = this.attributes.list if 'list' in this.attributes else [] %}
+            {% set cur_list = list if list is iterable and list is not string else [] %}
+            {% set entity_id = state_attr('binary_sensor.sprinkler_valve_is_excluded','cur_valve_entity') %}
+            {{
+              none if trigger.id == 'clear'
+              else (cur_list + [entity_id])|unique|list if trigger.id == 'exclude'
+              else cur_list|reject('match',entity_id)|list
+            }}
+
+  #===================== UI Helpers ==================================
+
+  # ------------ Program Summary ----------------
+  # This generates the queue as above, but for displaying what valves will run and for how long.
+  # That is, a summary of the valves and the adjusted times for each
+
+  - triggers:
+      - trigger: state
+        entity_id:
+          - select.sprinkler_program
+          - input_number.sprinkler_valve_percent_runtime
+        not_to:
+          - unavailable
+          - unknown
+        not_from:
+          - unavailable
+        id: button_press
+    actions:
+      - variables:
+          percent: "{{ states('input_number.sprinkler_valve_percent_runtime')|int(0) }}"
+          progs: "{{ state_attr('sensor.sprinkler_config', 'programs' ) }}"
+          exclude_list: "{{ state_attr('sensor.sprinkler_exclude_list','list') }}"
+          p: "{{ states('select.sprinkler_program' ) }}"
+          q: "{{ progs[p].values()|list if p in progs else [] }}"
+    sensor:
+      - name: Sprinkler Program Summary
+        default_entity_id: sensor.sprinkler_program_summary
+        unique_id: sprinkler_program_summary_id
+        state: "{{ now() }}"
+        attributes:
+          program:  |-
+            {% set ns = namespace(valves=[],total_time=0.0) %}
+            {% for v in q -%}
+              {% set min =  (v[1]|int(0) * percent / 100)|int(0) -%}
+              {% set ns.valves = ns.valves + [ [ v[0], min, v[0] in exclude_list ] ] -%}
+              {% if not v[0] in exclude_list -%}
+                {% set ns.total_time = ns.total_time + min -%}
+              {% endif -%}
+            {% endfor %}
+            {{ dict(summary=ns.valves, total_time=ns.total_time)  }}
+
+
+
+
+  # This reports if the current selected valve is in the exclude list
+  # unavailable when there's no valve selectedto check.
+  - triggers:
+      - trigger: state
+        entity_id:
+          - select.sprinkler_program
+          - select.sprinkler_valve
+          - sensor.sprinkler_exclude_list
+        not_to:
+          - unavailable
+          - unknown
+    actions:
+      - variables:
+          progs: "{{ state_attr('sensor.sprinkler_config', 'programs' ) }}"
+          p: "{{ states('select.sprinkler_program' ) }}"
+          v: "{{ states('select.sprinkler_valve') }}"
+          exclude_list: "{{ state_attr('sensor.sprinkler_exclude_list','list') }}"
+          valve_entity: >
+            {{
+              progs[p][v][0]
+                if progs is mapping and p in progs
+                and progs[p] is mapping and v in progs[p]
+                else false
+            }}
+    binary_sensor:
+      - name: Sprinkler Valve Is Excluded
+        default_entity_id: binary_sensor.sprinkler_valve_is_excluded
+        unique_id: sprinkler_valve_is_excluded_id
+        state: "{{ true if  exclude_list is iterable and  valve_entity in exclude_list }}"
+        availability: "{{ true if valve_entity else false }}"
+        attributes:
+          cur_valve_entity: "{{ valve_entity }}"
+
+
+
