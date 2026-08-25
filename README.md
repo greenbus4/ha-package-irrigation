@@ -74,7 +74,7 @@ To Do:
 
 ## UI Requirement
 
-## HACS
+### HACS
  * wget -O - https://get.hacs.xyz | bash -
  * add the integration
  * authorize with gihub (why?)
@@ -84,7 +84,8 @@ To Do:
 * logbook-card
 
 To use the scheduling (`sprinkler_schedule.yaml`)
-* Install local calendar named "Irrigation"
+* Install `Local Calendar` integrations
+* Create a calendar named "Irrigation"
 
 And the monitoring has a `notify.sprinkler_log`
 (This wasn't working on 2026.8.2)
