@@ -220,7 +220,14 @@ automation:
 
     actions:
 
-      # Is there a case where it would already be set to 1?
+      # In case it's already set to 1
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sprinkler_current_queue_position
+        data:
+          value: 0
+
+
       - action: input_number.set_value
         target:
           entity_id: input_number.sprinkler_current_queue_position
@@ -233,6 +240,9 @@ automation:
     triggers:
       - trigger: state
         entity_id: input_number.sprinkler_current_queue_position
+
+    conditions:
+      - "{{ states('input_number.sprinkler_current_queue_position' )|int(1) > 0 }}"
 
     actions:
 
@@ -367,6 +377,7 @@ automation:
           - conditions:
               - "{{ 'finished' in event_type }}"
             sequence:
+              # This delay is to allow final counts of water used by the previous valve
               - delay:
                   seconds: 2
               - action: input_number.increment
@@ -428,6 +439,9 @@ automation:
                 target:
                   entity_id: "{{ cur_valve_entity }}"
 
+              - event: sprinkler_set_status_message
+                event_data:
+                  message: Shut off {{ cur_valve_name }} after HA restart..
 
   # --------------- Check for zombie valve on HA restart --------------
   - alias: "Sprinkler Run: Paused Too Long"
