@@ -206,15 +206,17 @@
 recorder:
   exclude:
     entities:
+      - input_number.sprinkler_queue_position
       - sensor.sprinkler_remaining_time
       - sensor.sprinkler_display_message
       - sensor.sprinkler_upcoming_schedule
       - sensor.sprinkler_program_summary
-      - script.sprinkler_log_message
 
 logbook:
   # Maybe *.sprinkler_*?
   exclude:
+    entities:
+      - input_number.sprinkler_queue_position
     entity_globs:
       - sensor.sprinkler_*
       - select.sprinkler_*
@@ -230,13 +232,6 @@ input_number:
   sprinkler_current_queue_position:
     min: 0
     max: 50
-
-input_text:
-
-  # The script.sprinkler_log_message updates this. Using a script so it can be "queued" to not drop messages.
-  # See https://community.home-assistant.io/t/wth-no-queued-or-restart-mode-for-trigger-based-template-sensor-action/819289?
-  sprinkler_log_message:
-
 
 
 
@@ -285,31 +280,6 @@ script:
 
 
 
-  # This is a queued scirpt for writing "logs" to a input_text's state so that the custom:logbook-card can display it.
-  # Using a script so it can be "queued" and thus have to update an input_select (not a trigger-based template sensor).
-  # See: https://community.home-assistant.io/t/wth-no-queued-or-restart-mode-for-trigger-based-template-sensor-action/819289
-
-  sprinkler_log_message:
-    mode: queued
-    alias: Updates a text sensor based on the passed in message and user
-    fields:
-      message:
-        name: Message to add to the logs
-        required: true
-        selector:
-          text:
-      usere:
-        name: User to prefix the log with
-        required: true
-        selector:
-          text:
-    sequence:
-      - action: input_text.set_value
-        target:
-          entity_id: input_text.sprinkler_log_message
-        data:
-          value: "{{ message }} by {{ user }}"
-
 
 template:
 
@@ -337,6 +307,7 @@ template:
   #
   - switch:
       name: Sprinkler Master Switch
+      default_entity_id: switch.sprinkler_master_switch
       unique_id: sprinkler_master_switch_id
       turn_on:
         - if:

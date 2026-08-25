@@ -1,0 +1,77 @@
+recorder:
+  exclude:
+    entities:
+      - input_number.sprinkler_valve_minutes
+      - input_number.sprinkler_vavle_percent_runtime
+
+logbook:
+  exclude:
+    entities:
+      - input_number.sprinkler_valve_minutes
+      - input_number.sprinkler_vavle_percent_runtime
+
+
+
+input_number:
+
+  # This displays the number loaded from the config
+  # and can be modified
+  sprinkler_valve_minutes:
+    name: Valve Minutes
+    min: 0
+    max: 200
+    mode: box
+    icon: mdi:timer-outline
+
+
+  # This is an actual input box
+  sprinkler_valve_percent_runtime:
+    name: Percent Runtime
+    initial: 100
+    min: 0
+    max: 200
+    unit_of_measurement: '%'
+    icon: mdi:percent
+
+
+automation:
+
+  # For updating the minutes display when there's a ui action
+  - id: sprinkler_update_minutes
+    alias: Sprinkler Update Minutes
+    triggers:
+      - trigger: state
+        entity_id:
+          - select.sprinkler_valve
+          - input_number.sprinkler_valve_percent_runtime
+
+    actions:
+      - action: script.sprinkler_get_minutes
+        data:
+          program: "{{ states('select.sprinkler_program') }}"
+          valve: "{{ states('select.sprinkler_valve') }}"
+        response_variable: data
+
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sprinkler_valve_minutes
+        data:
+          value: "{{ data.minutes }}"
+
+      - if:
+          - condition: template
+            value_template: "{{ trigger.entity_id == 'input_number.sprinkler_valve_percent_runtime' }}"
+        then:
+          - action: script.sprinkler_log_message
+            data:
+              message: "Percent updated to: {{ data.minutes }}%"
+              user: |-
+                {{
+                  states.person
+                  | selectattr( "attributes.user_id", "==", trigger.to_state.context.user_id)
+                  | map(attribute="attributes.friendly_name")
+                  | first
+                  | default('Reload')
+                }}
+
+

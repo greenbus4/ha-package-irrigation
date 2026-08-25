@@ -1,0 +1,415 @@
+# Generate list of existing switches for here
+# -------------------------------------------
+#
+#  template:
+#    - switch:
+#  {% 
+#    for v in states.switch
+#    |selectattr('entity_id', 'search', 'sprinkler_valve_\d\d$')
+#    | sort(attribute='entity_id')
+#  %}
+#  {%- set count = v.entity_id[-2:] %}
+#      - name: "{{ v.attributes.friendly_name }}"
+#        default_entity_id: {{ v.entity_id }}
+#        unique_id: valve_id_{{ count }}
+#        optimistic: true
+#        turn_on:
+#           - action: system_log.write
+#             data:
+#               message: "Turned on valve #{{ count }} {{ v.attributes.friendly_name }}"
+#        turn_off:
+#           - action: system_log.write
+#             data:
+#               message: "Turned off valve #{{ count }} {{ v.attributes.friendly_name }}"
+#  {% endfor %}
+
+
+
+template:
+  - switch:
+
+    - name: "Hot tub & wall Drips"
+      default_entity_id: switch.sprinkler_valve_01
+      unique_id: valve_id_01
+      optimistic: true
+      turn_on:
+         - action: system_log.write
+           data:
+             message: "Turned on valve #01 Hot tub & wall Drips"
+      turn_off:
+         - action: system_log.write
+           data:
+             message: "Turned off valve #01 Hot tub & wall Drips"
+
+    - name: "02) [Capped] Horseshoe Sprinklers"
+      default_entity_id: switch.sprinkler_valve_02
+      unique_id: valve_id_02
+      optimistic: true
+      turn_on:
+         - action: system_log.write
+           data:
+             message: "Turned on valve #02 02) [Capped] Horseshoe Sprinklers"
+      turn_off:
+         - action: system_log.write
+           data:
+             message: "Turned off valve #02 02) [Capped] Horseshoe Sprinklers"
+
+    - name: "Bedroom, horseshoe pit drips"
+      default_entity_id: switch.sprinkler_valve_03
+      unique_id: valve_id_03
+      optimistic: true
+      turn_on:
+         - action: system_log.write
+           data:
+             message: "Turned on valve #03 Bedroom, horseshoe pit drips"
+      turn_off:
+         - action: system_log.write
+           data:
+             message: "Turned off valve #03 Bedroom, horseshoe pit drips"
+
+    - name: "04) Unsued"
+      default_entity_id: switch.sprinkler_valve_04
+      unique_id: valve_id_04
+      optimistic: true
+      turn_on:
+         - action: system_log.write
+           data:
+             message: "Turned on valve #04 04) Unsued"
+      turn_off:
+         - action: system_log.write
+           data:
+             message: "Turned off valve #04 04) Unsued"
+
+    - name: "05) Unsued"
+      default_entity_id: switch.sprinkler_valve_05
+      unique_id: valve_id_05
+      optimistic: true
+      turn_on:
+         - action: system_log.write
+           data:
+             message: "Turned on valve #05 05) Unsued"
+      turn_off:
+         - action: system_log.write
+           data:
+             message: "Turned off valve #05 05) Unsued"
+
+    - name: "06) Unsued"
+      default_entity_id: switch.sprinkler_valve_06
+      unique_id: valve_id_06
+      optimistic: true
+      turn_on:
+         - action: system_log.write
+           data:
+             message: "Turned on valve #06 06) Unsued"
+      turn_off:
+         - action: system_log.write
+           data:
+             message: "Turned off valve #06 06) Unsued"
+
+    - name: "North driveway drips"
+      default_entity_id: switch.sprinkler_valve_07
+      unique_id: valve_id_07
+      optimistic: true
+      turn_on:
+         - action: system_log.write
+           data:
+             message: "Turned on valve #07 North driveway drips"
+      turn_off:
+         - action: system_log.write
+           data:
+             message: "Turned off valve #07 North driveway drips"
+
+    - name: "North & east fence drips"
+      default_entity_id: switch.sprinkler_valve_08
+      unique_id: valve_id_08
+      optimistic: true
+      turn_on:
+         - action: system_log.write
+           data:
+             message: "Turned on valve #08 North & east fence drips"
+      turn_off:
+         - action: system_log.write
+           data:
+             message: "Turned off valve #08 North & east fence drips"
+
+    - name: "North lower 4 sprinklers"
+      default_entity_id: switch.sprinkler_valve_09
+      unique_id: valve_id_09
+      optimistic: true
+      turn_on:
+         - action: system_log.write
+           data:
+             message: "Turned on valve #09 North lower 4 sprinklers"
+      turn_off:
+         - action: system_log.write
+           data:
+             message: "Turned off valve #09 North lower 4 sprinklers"
+
+    - name: "North upper 3 sprinklers"
+      default_entity_id: switch.sprinkler_valve_10
+      unique_id: valve_id_10
+      optimistic: true
+      turn_on:
+         - action: system_log.write
+           data:
+             message: "Turned on valve #10 North upper 3 sprinklers"
+      turn_off:
+         - action: system_log.write
+           data:
+             message: "Turned off valve #10 North upper 3 sprinklers"
+
+    - name: "11) Unused"
+      default_entity_id: switch.sprinkler_valve_11
+      unique_id: valve_id_11
+      optimistic: true
+      turn_on:
+         - action: system_log.write
+           data:
+             message: "Turned on valve #11 11) Unused"
+      turn_off:
+         - action: system_log.write
+           data:
+             message: "Turned off valve #11 11) Unused"
+
+    - name: "12) Unused"
+      default_entity_id: switch.sprinkler_valve_12
+      unique_id: valve_id_12
+      optimistic: true
+      turn_on:
+         - action: system_log.write
+           data:
+             message: "Turned on valve #12 12) Unused"
+      turn_off:
+         - action: system_log.write
+           data:
+             message: "Turned off valve #12 12) Unused"
+
+    - name: "13) Unused"
+      default_entity_id: switch.sprinkler_valve_13
+      unique_id: valve_id_13
+      optimistic: true
+      turn_on:
+         - action: system_log.write
+           data:
+             message: "Turned on valve #13 13) Unused"
+      turn_off:
+         - action: system_log.write
+           data:
+             message: "Turned off valve #13 13) Unused"
+
+    - name: "14) Unused"
+      default_entity_id: switch.sprinkler_valve_14
+      unique_id: valve_id_14
+      optimistic: true
+      turn_on:
+         - action: system_log.write
+           data:
+             message: "Turned on valve #14 14) Unused"
+      turn_off:
+         - action: system_log.write
+           data:
+             message: "Turned off valve #14 14) Unused"
+
+    - name: "15) Unused"
+      default_entity_id: switch.sprinkler_valve_15
+      unique_id: valve_id_15
+      optimistic: true
+      turn_on:
+         - action: system_log.write
+           data:
+             message: "Turned on valve #15 15) Unused"
+      turn_off:
+         - action: system_log.write
+           data:
+             message: "Turned off valve #15 15) Unused"
+
+    - name: "16) Unused"
+      default_entity_id: switch.sprinkler_valve_16
+      unique_id: valve_id_16
+      optimistic: true
+      turn_on:
+         - action: system_log.write
+           data:
+             message: "Turned on valve #16 16) Unused"
+      turn_off:
+         - action: system_log.write
+           data:
+             message: "Turned off valve #16 16) Unused"
+
+    - name: "Long grass north section pop-ups"
+      default_entity_id: switch.sprinkler_valve_17
+      unique_id: valve_id_17
+      optimistic: true
+      turn_on:
+         - action: system_log.write
+           data:
+             message: "Turned on valve #17 Long grass north section pop-ups"
+      turn_off:
+         - action: system_log.write
+           data:
+             message: "Turned off valve #17 Long grass north section pop-ups"
+
+    - name: "North of front path drips"
+      default_entity_id: switch.sprinkler_valve_18
+      unique_id: valve_id_18
+      optimistic: true
+      turn_on:
+         - action: system_log.write
+           data:
+             message: "Turned on valve #18 North of front path drips"
+      turn_off:
+         - action: system_log.write
+           data:
+             message: "Turned off valve #18 North of front path drips"
+
+    - name: "South hill, fence drips"
+      default_entity_id: switch.sprinkler_valve_19
+      unique_id: valve_id_19
+      optimistic: true
+      turn_on:
+         - action: system_log.write
+           data:
+             message: "Turned on valve #19 South hill, fence drips"
+      turn_off:
+         - action: system_log.write
+           data:
+             message: "Turned off valve #19 South hill, fence drips"
+
+    - name: "Planters by kitchen & living room"
+      default_entity_id: switch.sprinkler_valve_20
+      unique_id: valve_id_20
+      optimistic: true
+      turn_on:
+         - action: system_log.write
+           data:
+             message: "Turned on valve #20 Planters by kitchen & living room"
+      turn_off:
+         - action: system_log.write
+           data:
+             message: "Turned off valve #20 Planters by kitchen & living room"
+
+    - name: "West Berm by road"
+      default_entity_id: switch.sprinkler_valve_21
+      unique_id: valve_id_21
+      optimistic: true
+      turn_on:
+         - action: system_log.write
+           data:
+             message: "Turned on valve #21 West Berm by road"
+      turn_off:
+         - action: system_log.write
+           data:
+             message: "Turned off valve #21 West Berm by road"
+
+    - name: "Left side of path up hill two sprinklers"
+      default_entity_id: switch.sprinkler_valve_22
+      unique_id: valve_id_22
+      optimistic: true
+      turn_on:
+         - action: system_log.write
+           data:
+             message: "Turned on valve #22 Left side of path up hill two sprinklers"
+      turn_off:
+         - action: system_log.write
+           data:
+             message: "Turned off valve #22 Left side of path up hill two sprinklers"
+
+    - name: "Hill redwoods sprinklers"
+      default_entity_id: switch.sprinkler_valve_23
+      unique_id: valve_id_23
+      optimistic: true
+      turn_on:
+         - action: system_log.write
+           data:
+             message: "Turned on valve #23 Hill redwoods sprinklers"
+      turn_off:
+         - action: system_log.write
+           data:
+             message: "Turned off valve #23 Hill redwoods sprinklers"
+
+    - name: "Hillside and fountain drips"
+      default_entity_id: switch.sprinkler_valve_24
+      unique_id: valve_id_24
+      optimistic: true
+      turn_on:
+         - action: system_log.write
+           data:
+             message: "Turned on valve #24 Hillside and fountain drips"
+      turn_off:
+         - action: system_log.write
+           data:
+             message: "Turned off valve #24 Hillside and fountain drips"
+
+    - name: "Lawn pop-ups"
+      default_entity_id: switch.sprinkler_valve_25
+      unique_id: valve_id_25
+      optimistic: true
+      turn_on:
+         - action: system_log.write
+           data:
+             message: "Turned on valve #25 Lawn pop-ups"
+      turn_off:
+         - action: system_log.write
+           data:
+             message: "Turned off valve #25 Lawn pop-ups"
+
+    - name: "Long grass south pop-ups"
+      default_entity_id: switch.sprinkler_valve_26
+      unique_id: valve_id_26
+      optimistic: true
+      turn_on:
+         - action: system_log.write
+           data:
+             message: "Turned on valve #26 Long grass south pop-ups"
+      turn_off:
+         - action: system_log.write
+           data:
+             message: "Turned off valve #26 Long grass south pop-ups"
+
+    - name: "Front south of sidewalk & deck drips"
+      default_entity_id: switch.sprinkler_valve_27
+      unique_id: valve_id_27
+      optimistic: true
+      turn_on:
+         - action: system_log.write
+           data:
+             message: "Turned on valve #27 Front south of sidewalk & deck drips"
+      turn_off:
+         - action: system_log.write
+           data:
+             message: "Turned off valve #27 Front south of sidewalk & deck drips"
+
+
+
+
+
+  - sensor:
+    - name: Water FLow
+      default_entity_id: sensor.irrigation_water_monitor_flow
+      unique_id: irrigation_water_monitor_flow_id
+      state: 0.0
+      state_class: measurement
+      unit_of_measurement: gal/min
+      device_class: volume_flow_rate
+
+    - name: Water Pressure
+      default_entity_id: sensor.irrigation_water_monitor_water_pressure
+      state: 45.5
+      state_class: measurement
+      unit_of_measurement: psi
+      device_class: pressure
+      icon: mdi:gauge
+
+
+  - select:
+    - name: Daily Irrigation
+      default_entity_id: select.daily_irrigation
+      unique_id: select_daily_irrigation_id
+      state: "none"
+      options: "{{ ['none','hose'] }}"
+
+    - name: Monthly Irrigation
+      default_entity_id: select.monthly_irrigation
+      unique_id: select_monthly_irrigation_id
+      state: "none"
+      options: "{{ ['none','hose'] }}"

@@ -72,6 +72,30 @@ To Do:
 
 ## Concepts
 
+## UI Requirement
+
+## HACS
+ * wget -O - https://get.hacs.xyz | bash -
+ * add the integration
+ * authorize with gihub (why?)
+
+* text-divider-row (used on the raw switch page)
+* uix and the uix integration
+* logbook-card
+
+To use the scheduling (`sprinkler_schedule.yaml`)
+* Install local calendar named "Irrigation"
+
+And the monitoring has a `notify.sprinkler_log`
+(This wasn't working on 2026.8.2)
+* add the directory to `configuration.yaml`
+```
+  allowlist_external_dirs:
+    - "/config"
+```
+* Add the `File` integration and setup `sprinkler.log` as an output
+* rename the created entity to `notify.sprinkler_log`
+
 
 
 

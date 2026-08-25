@@ -43,16 +43,15 @@ template:
         data:
           duration:
             hours: 200
-      - action: script.sprinkler_configuration
-        response_variable: base_config
+
     sensor:
       - name: Sprinkler Upcoming Schedule
         unique_id: sprinkler_upcoming_schedule_id
         state: "{{ now() }}"
         attributes:
           events: |-
-            {% set config = base_config.programs|map(attribute='name')|list %}
             {% set progs = state_attr('sensor.sprinkler_config', 'programs' ) %}
+            {% set config = progs.keys()|list %}
             {% set ns = namespace(events=[]) %}
             {% for event in schedule['calendar.irrigation']['events'] %}
               {% if as_datetime(event.start) > now() %}

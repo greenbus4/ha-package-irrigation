@@ -1,144 +1,156 @@
-#
-# This is mostly for loading the configuration from the YAML
-# that is returned from a script (script.sprinkler_configuration)
-# That is separate so that it's "easy" to change from the HA Scripts UI.
-#
-# Entities:
-#
-#   input_button.sprinkler_reload_config
-#     Button to trigger loading the raw YAML  config and save it in a sensor attribute.
-#
-#
-#   sensor.sprinkler_load_config
-#     This trigger-based sensor is triggered when the button is pressed and it
-#     calls script.sprinkler_load_config to load read the raw YAML and process it into
-#     what is used to run the various programs.
-#     It has two attributes: "progs" which is a hash of hashes of the valid valves
-#     and "bad" that stores error messages found when processing the config (e.g. bad entity id)
-#
-#
-#   sensor.sprinkler_config_issue
-#     Just a sensor to display any issues loading the configuration
-#
-#
-#   script.sprinkler_load_config
-#     Helper script that load the raw configuration YAML (script.sprinkler_configuration)
-#     and organizes it and returns it. The above sensor.sprinkler_log_config calls it.
-#     Doesnt't really need to be separate but wanted a way to run it and see the response data.
-#
+
+recorder:
+  exclude:
+    entities:
+      - sensor.sprinkler_config
+      - script.sprinkler_log_message
+
+logbook:
+  exclude:
+    entities:
+      - sensor.sprinkler_config
+      - script.sprinkler_log_message
 
 
-# ======= Helpers ========
-
-input_button:
-
-  # Button to refresh the template sensor that holds the configuration
-  sprinkler_reload_config_button:
-    name: Sprinkler Reload Configuration
 
 template:
 
 
   # ---------- Configuration sensor -------------------
   - triggers:
-      - trigger: state
-        entity_id: input_button.sprinkler_reload_config_button
+      - trigger: homeassistant
+        event: start
 
-    actions:
-      - action: script.sprinkler_load_config
-        response_variable: config
+      - platform: event
+        event_type: event_template_reloaded
 
-      - action: script.sprinkler_log_message
-        data:
-          message: Reloaded Config
-          user: |-
-            {{
-              states.person 
-              | selectattr( "attributes.user_id", "==", trigger.to_state.context.user_id)
-              | map(attribute="attributes.friendly_name")
-              | first
-            }}
+    variables:
+      programs:
+        The Hose on the Hill:
+          Left side of path up hill two sprinklers:
+            - switch.sprinkler_valve_22
+            - 20
+        Native Plant drips:
+          Hot tub & wall Drips:
+            - switch.sprinkler_valve_01
+            - 33
+          Planters by kitchen & living room:
+            - switch.sprinkler_valve_20
+            - 33
+          Hillside and fountain drips:
+            - switch.sprinkler_valve_24
+            - 33
+        Established Drips:
+          West Berm by road:
+            - switch.sprinkler_valve_21
+            - 44
+          Bedroom, horseshoe pit drips:
+            - switch.sprinkler_valve_03
+            - 44
+          North driveway drips:
+            - switch.sprinkler_valve_07
+            - 44
+          North & east fence drips:
+            - switch.sprinkler_valve_08
+            - 44
+          North of front path drips:
+            - switch.sprinkler_valve_18
+            - 44
+          South hill, fence drips:
+            - switch.sprinkler_valve_19
+            - 44
+          Front south of sidewalk & deck drips:
+            - switch.sprinkler_valve_27
+            - 44
+        Lawn and Tall Grass:
+          Lawn pop-ups:
+            - switch.sprinkler_valve_25
+            - 15
+          Long grass south pop-ups:
+            - switch.sprinkler_valve_26
+            - 15
+          Long grass north section pop-ups:
+            - switch.sprinkler_valve_17
+            - 15
+        Vinca Heads:
+          North lower 4 sprinklers:
+            - switch.sprinkler_valve_09
+            - 22
+          North upper 3 sprinklers:
+            - switch.sprinkler_valve_10
+            - 22
+          Left side of path up hill two sprinklers:
+            - switch.sprinkler_valve_22
+            - 0
+          Hill redwoods sprinklers:
+            - switch.sprinkler_valve_23
+            - 22
 
     sensor:
       - name: Sprinkler Config
         unique_id: sprinkler_config_id
+        default_entity_id: sensor.sprinkler_config
         state: "{{ now() }}"
         attributes:
-          programs: "{{ config.programs }}"
-          bad: "{{ config.bad if config.bad|length else ['Happy'] }}"
+          programs: "{{ programs }}"
 
 
 
-  # -------- This template sensor just is used to display the errors found in the config file
-  # Probably don't really need this as a Markdown card might be bettoer display, but this can
-  # be added to an entities card right next to the button to reload the config.
-  - triggers:
-      - trigger: state
-        entity_id: sensor.sprinkler_config
-        attribute: bad
-    sensor:
-      - name: Sprinkler Config Issue
-        state: "{{ state_attr('sensor.sprinkler_config', 'bad')|join(', ') }}"
+# ======= Helpers ========
+
+input_text:
+
+  # The script.sprinkler_log_message updates this. Using a script so it can be "queued" to not drop messages.
+  # See https://community.home-assistant.io/t/wth-no-queued-or-restart-mode-for-trigger-based-template-sensor-action/819289?
+  sprinkler_log_message:
+
 
 
 script:
 
-  # Why does this turn an array of valves into dictionary keyed by valve names?
-  # I guess so can look up a valve by it's name??
+  # This is a queued scirpt for writing "logs" to a input_text's state so that the custom:logbook-card can display it.
+  # Using a script so it can be "queued" and thus have to update an input_select (not a trigger-based template sensor).
+  # See: https://community.home-assistant.io/t/wth-no-queued-or-restart-mode-for-trigger-based-template-sensor-action/819289
 
-  sprinkler_load_config:
+  sprinkler_log_message:
+    mode: queued
+    alias: Updates a text sensor based on the passed in message and user
+    fields:
+      message:
+        name: Message to add to the logs
+        required: true
+        selector:
+          text:
+      usere:
+        name: User to prefix the log with
+        required: true
+        selector:
+          text:
     sequence:
-      - action: script.sprinkler_configuration
-        response_variable: config
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.sprinkler_log_message
+        data:
+          value: "{{ message }} by {{ user }}"
 
+
+
+  sprinkler_get_minutes:
+    mode: queued
+    fields:
+      program:
+        name: Selected program Name
+      valve:
+        name: Selected valve Name
+
+    sequence:
       - variables:
-          programs: >-
-            {% set ns = namespace(config={}, bad=[]) -%}
+          programs: "{{ state_attr('sensor.sprinkler_config','programs') }}"
+          conf_min: "{{ programs.get(program,{}).get(valve,[1,0])[1]}}"
+          percent: "{{ states('input_number.sprinkler_valve_percent_runtime')|default(100,true) }}"
+          data:
+            minutes: "{{ (conf_min|int * percent|int /100)|int }}"
 
-            {% for p in config.programs %}
-              {% if 'enabled' in p and not p.enabled -%}
-                {% continue -%}
-              {% endif -%}
-              {% if not 'name' in p -%}
-                {% set ns.bad = ns.bad + ['Missing "name" for program #' ~ loop.index] -%}
-                {% continue -%}
-              {% endif -%}
-
-              {% set min = config.default_run_minutes or 10 -%}
-              {% set v_ns = namespace(valve={}) -%}
-              {% for v in p.valves -%}
-
-                {% set bad =
-                  'entity_id missing'if not 'entity_id' in v
-                  else 'bad entity: "' ~ v.entity_id ~ '"' if states(v.entity_id) == 'unknown'
-                  else 'Bad minutes for "' ~ v.entity_id ~ '" of "' ~ v.minutes ~ '"'
-                  if 'minutes' in v and v.minutes|int(-1) < 0
-                -%}
-                {% if bad -%}
-                  {% set ns.bad = ns.bad + [bad ~ ' in program "' ~ p.name ~ '" position: ' ~ loop.index] -%}
-                  {% continue -%}
-                {% endif -%}
-
-                {% set v_name = entity_name(v.entity_id) -%}
-                {%
-                  set min = v.minutes if 'minutes' in v
-                  else p.default_run_minutes if 'default_run_minutes' in p
-                  else min
-                -%}
-                {% set v_ns.valve = dict(v_ns.valve, **{v_name: [v.entity_id,min] }) -%}
-              {% endfor -%}
-
-              {% if v_ns.valve.keys()|length == 0 -%}
-                {% set ns.bad = ns.bad + ['Skipped program "' ~ p.name ~ '": no valid valves found.'] -%}
-                {% continue -%}
-              {% endif -%}
-
-              {% set this = {p.name: v_ns.valve } -%}
-              {% set ns.config = dict(ns.config,**this) -%}
-            {% endfor -%}
-            {{ { "programs": ns.config, "bad": ns.bad } -}}
-      - stop: End
-        response_variable: programs
-
-
+      - stop: Calculated Minutes
+        response_variable: data
 
