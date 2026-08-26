@@ -282,6 +282,36 @@ automation:
 
 
   # ------- Check for high water usage ------------------------
+  # FIXME -- 
+  # This didn't catch the hose left on.
+  # Deciding to kill irrigation is more difficult.
+  # And 14g/m is way wrong -- the hose was only doing about 4g/m
+  #
+  # So, it's a bit more complex because you want to detect a leak,
+  # but normal irrigation uses a lot of water but is expected.
+  # So, you could exclude flows that are "normal" for when a specific valve is on
+  # (but within an expected duration).
+  # But, the hose isn't on a valve and that might be running longer depending on the use.
+  #
+  # So, maybe this "Notify high water usage" isn't needed and instead use the one below that checks for
+  # flow -- but that one works by checking a few minutes after the valve turned on which doesn't work
+  # for the hose.
+  #
+  # Side note: frankly, the hose is just another irrigation option and having a valve on it probably makes
+  # sense (except if there's an emergency...)
+  #
+  # Options:
+  #   1) Volume: check total water used during some period (every 30 min?) and subtract out any expected water
+  #      used during irrigation times. Might get warned about the hose, but maybe that's ok.
+  #      The irrigation system could note the current water meter at the start so that can easily get the delta volume.
+  #
+  #   2) Flow: Volume is an integration of flow, so maybe volume is the correct way. Plus, currently looking at
+  #      flow at a point in time.
+  #      Looking at it at a point in time makes sense to see if there's an problem with a specific valve.
+  #      But probably want to also look at total gallons used based on expected flow and total time running.
+  #
+  #
+
   - id: notifiy_hight_water_usage
     alias: 'Irrigation: Notify high water usage.'
     mode: single

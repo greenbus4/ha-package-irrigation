@@ -26,6 +26,7 @@ template:
     select:
       - name: Sprinkler program
         default_entity_id: select.sprinkler_program
+        unique_id: select_sprinkler_program_id
         optimistic: true
         options: "{{ programs }}"
 
@@ -50,6 +51,7 @@ template:
     select:
       - name: Sprinkler valve
         default_entity_id: select.sprinkler_valve
+        unique_id: select_sprinkler_valve_id
         optimistic: true
         options: "{{ programs }}"
 
