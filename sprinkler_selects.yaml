@@ -37,6 +37,12 @@ template:
       - trigger: state
         entity_id: select.sprinkler_program
 
+      - trigger: homeassistant
+        event: start
+
+      - platform: event
+        event_type: event_template_reloaded
+
     # Catch unloading
     conditions:
       - "{{ trigger.to_state != None }}"

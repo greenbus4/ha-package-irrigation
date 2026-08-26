@@ -416,10 +416,15 @@ automation:
 
     actions:
       - variables:
-          queue: "{{ state_attr('sensor.sprinkler_queue', 'queue' ) }}"
-          queue_idx: "{{ states('input_number.sprinkler_current_queue_position' )|int(1) }}"
-          cur_valve_entity: "{{ queue[queue_idx-1][0] }}"
-          cur_valve_name: "{{ entity_name(cur_valve_entity) }}"
+          queue_idx: "{{ states('input_number.sprinkler_current_queue_position' )|int(0) }}"
+          queue: "{{ state_attr('sensor.sprinkler_queue', 'queue' )|default([],true) }}"
+
+      - if:
+          - "{{ queue_idx == 0 or queue_idx > queue|length }}"
+        then:
+          - stop: "Sprinklers: HA Started but queue is empty or not running"
+
+
 
       - if:
           - "{{ not is_state('timer.sprinkler_valve_time','idle') }}"
@@ -427,7 +432,13 @@ automation:
           - action: system_log.write
             data:
               message: "HA Restarted but Sprinkler timer still running. No changes needed."
+
+
         else:
+          - variables:
+              cur_valve_entity: "{{ queue[queue_idx-1][0] }}"
+              cur_valve_name: "{{ entity_name(cur_valve_entity) }}"
+
           - if:
               - condition: template
                 value_template: "{{ is_state(cur_valve_entity, 'on') }}"
