@@ -61,25 +61,10 @@ template:
           - stop: End
 
 
-  ######## Clear/Remove comments ##########
-  # This template saves of the queue with updated run times.
-  # It is triggered either by the buttons to run a program or valve, or
-  # via a direct event to load a program.
-  # The state is the current time and the running of the "queue" is triggered when
-  # the state is changed.
-  # QUESTION: does the state changed event happen before the code updates the attributes?
-  # Finding user:
-  #   button action => trigger.to_state.context.user_id
-  #   button that triggers another script: trigger.event.context.parent_id => caller's ID
-  #   timer: parent and user ids are null. But you can see trigger.platform == 'time'
-  #   Manually fire event from dev console: trigger.event.context.user_id
-  #   BUT -- those are the direct triggers. An automation that triggers and then calls this (via event)
-  #   will NOT have the context to show where it came from.
-  #   NOT EVEN the parent_id!
 
-  #-------------- Load the queue -----------------------------
+  #-------------- Load/update the queue -----------------------------
   # This doesn't start the queue -- the runner watches for changes to this entity
-  # Only add valves that have > 0 minutes.
+  # Only include valves that have > 0 minutes.
 
   - triggers:
       - trigger: state
@@ -91,56 +76,85 @@ template:
           - unknown
         not_from:
           - unavailable
-        id: button_press
 
       - trigger: event
         event_type: sprinkler_schedule_run_program
         id: set_queue
 
-    actions:
-      - variables:
-          single: "{{ false if trigger.id == set_queue else trigger.entity_id == 'button.sprinkler_run_valve' }}"
-          percent: "{{ states('input_number.sprinkler_valve_percent_runtime')|int(0) }}"
-          progs: "{{ state_attr('sensor.sprinkler_config', 'programs' ) }}"
-          exclude_list: "{{ state_attr('sensor.sprinkler_exclude_list','list') }}"
-          m: "{{ states('input_number.sprinkler_valve_minutes') }}"
-          p: "{{ trigger.event.data.program if trigger.id == 'set_queue' else states('select.sprinkler_program' ) }}"
-          v: "{{ states('select.sprinkler_valve') }}"
-          q: |-
-            {{
-                [progs[p][v]] if single and p in progs and v in progs[p]
-                else progs[p].values()|list if not single and p in progs
-                else []
-            }}
-          valves: |-
-            {% set ns = namespace(valves=[]) %}
-            {% for v in q -%}
-              {% set min = m|int(0) if single else (v[1]|int(0) * percent / 100)|int(0) -%}
-              {% if min and (single or not v[0] in exclude_list) -%}
-                {% set ns.valves = ns.valves + [ [v[0], min] ] -%}
-              {% endif -%}
-            {% endfor %}
-            {{ ns.valves }}
+      - trigger: event
+        event_type: sprinkler_clear_queue
+        id: clear_queue
 
-          # This doesn't cover all the cases. Like if triggered by an event in the UI, where there would be a user_id available.
-          user: |-
-            {{
-              'Schedule' if trigger.id == 'set_queue' 
-              else 
-                states.person 
-                | selectattr( "attributes.user_id", "==", trigger.to_state.context.user_id)
-                | map(attribute="attributes.friendly_name")
-                | first
-            }}
-      - action: script.sprinkler_log_message
-        data:
-          user:  "{{ user }}"
-          message: |-
-            {{ 
-              'Nothing to run as all valves have no times' if not valves|length else
-              'Starting valve "' ~ v ~ '"' if single else
-              'Starting program "' ~ p ~ '"'
-            }}
+      - trigger: event
+        event_type: sprinkler_pop_queue
+        id: pop_queue
+
+    actions:
+
+      - if:
+          - "{{ trigger.id in ['pop_queue','clear_queue'] }}"
+        then:
+          - variables:
+              queue: "{{ state_attr('sensor.sprinkler_queue', 'queue' )|default([],true) }}"
+              valves: "{{ queue[1:] if trigger.id == 'pop_queue' else [] }}"
+
+          # Just a little safety in case the queue is messed with elsewhere
+          - if:
+              - "{{ queue|length > 0 }}"
+            then:
+              - action: homeassistant.turn_off
+                target:
+                  entity_id: "{{ queue[0][0] }}"
+
+        # Build and set the queue (either from manual run or from a schedule/automation)
+        else:
+          - variables:
+              p: "{{ trigger.event.data.program if trigger.id == 'set_queue' else states('select.sprinkler_program' ) }}"
+              # TODO: How is fetching the valve here correct?
+              v: "{{ states('select.sprinkler_valve') }}"
+
+              single: "{{ false if trigger.id == set_queue else trigger.entity_id == 'button.sprinkler_run_valve' }}"
+              percent: "{{ states('input_number.sprinkler_valve_percent_runtime')|int(0) }}"
+              progs: "{{ state_attr('sensor.sprinkler_config', 'programs' ) }}"
+              exclude_list: "{{ state_attr('sensor.sprinkler_exclude_list','list') }}"
+              m: "{{ states('input_number.sprinkler_valve_minutes') }}"
+              q: |-
+                {{
+                    [progs[p][v]] if single and p in progs and v in progs[p]
+                    else progs[p].values()|list if not single and p in progs
+                    else []
+                }}
+              valves: |-
+                {% set ns = namespace(valves=[]) %}
+                {% for v in q -%}
+                  {% set min = m|int(0) if single else (v[1]|int(0) * percent / 100)|int(0) -%}
+                  {% if min and (single or not v[0] in exclude_list) -%}
+                    {% set ns.valves = ns.valves + [ [v[0], min] ] -%}
+                  {% endif -%}
+                {% endfor %}
+                {{ ns.valves }}
+
+              # This doesn't cover all the cases. Like if triggered by an event in the UI, where there would be a user_id available.
+              user: |-
+                {{
+                  'Schedule' if trigger.id == 'set_queue' 
+                  else 
+                    states.person 
+                    | selectattr( "attributes.user_id", "==", trigger.to_state.context.user_id)
+                    | map(attribute="attributes.friendly_name")
+                    | first
+                }}
+
+
+          - action: script.sprinkler_log_message
+            data:
+              user:  "{{ user }}"
+              message: |-
+                {{ 
+                  'Nothing to run as all valves have no times' if not valves|length else
+                  'Starting valve "' ~ v ~ '"' if single else
+                  'Starting program "' ~ p ~ '"'
+                }}
 
     sensor:
       - name: Sprinkler Queue
@@ -148,9 +162,9 @@ template:
         state: "{{ now() }}"
         attributes:
           queue: "{{ valves }}"
-          prog: "{{ p }}"
-          valve: "{{ v }}"
-          user: "{{ user }}"
+          prog: "{{ p | default(this.attributes.prog|default('',true)) }}"
+          valve: "{{ v | default(this.attributes.valve|default('',true)) }}"
+          user: "{{ user | default( this.attributes.user|default('',true)) }}"
 
 
   # ====================== EXCLUDE LIST ==========================================
@@ -237,7 +251,7 @@ template:
           - unknown
         not_from:
           - unavailable
-        id: button_press
+
     actions:
       - variables:
           percent: "{{ states('input_number.sprinkler_valve_percent_runtime')|int(0) }}"
@@ -245,6 +259,8 @@ template:
           exclude_list: "{{ state_attr('sensor.sprinkler_exclude_list','list') }}"
           p: "{{ states('select.sprinkler_program' ) }}"
           q: "{{ progs[p].values()|list if p in progs else [] }}"
+
+
     sensor:
       - name: Sprinkler Program Summary
         default_entity_id: sensor.sprinkler_program_summary

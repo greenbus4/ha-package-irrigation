@@ -27,15 +27,6 @@ timer:
   sprinkler_valve_time:
     restore: true
 
-input_number:
-
-  # This is 1-based. Is that insane?
-  sprinkler_current_queue_position:
-    min: 0
-    max: 50
-
-
-
 
 template:
 
@@ -175,7 +166,7 @@ template:
         event_type: sprinkler_set_status_message
     variables:
       data: "{{ trigger.event.data }}"
-      message: "{{ data.message }}"
+      message: "{{ data.message if 'message' in data else 'Missing Message' }}"
       title: "{{ data.title if 'title' in data else 'Info' }}"
       next:  "{{ data.next if 'next' in data else '' }}"
       prog:  "{{ data.prog if 'prog' in data else '' }}"
@@ -203,9 +194,16 @@ template:
           prog:  "{{ prog }}"
           user:  "{{ user }}"
 
+
+# ==================== Queue Running Automations =================
+
 automation:
 
   # --------------- Queue changed, start running --------------
+  # Essentially, any time the queue changes start the timer (which turns on the valve)
+  # This can also trigger if/when the queue is empty.
+  #
+
   - alias: "Sprinkler Run: Queue Changed"
     id: sprinkler_run_queue_changed
 
@@ -220,53 +218,20 @@ automation:
 
     actions:
 
-      # In case it's already set to 1
-      - action: input_number.set_value
-        target:
-          entity_id: input_number.sprinkler_current_queue_position
-        data:
-          value: 0
-
-
-      - action: input_number.set_value
-        target:
-          entity_id: input_number.sprinkler_current_queue_position
-        data:
-          value: 1
-
-  # --------------- Queue position changed start timer  --------------
-  - alias: "Sprinkler Run: Queue Position Changed"
-    id: sprinkler_run_queue_position_changed
-    triggers:
-      - trigger: state
-        entity_id: input_number.sprinkler_current_queue_position
-
-    conditions:
-      - "{{ states('input_number.sprinkler_current_queue_position' )|int(1) > 0 }}"
-
-    actions:
-
-      # Make sure then updated position is written to disk
-      - action: homeassistant.save_persistent_states
-
 
       - variables:
-          queue: "{{ state_attr('sensor.sprinkler_queue', 'queue' ) }}"
-          queue_idx: "{{ states('input_number.sprinkler_current_queue_position' )|int(1) }}"
+          queue: "{{ state_attr('sensor.sprinkler_queue', 'queue' )|default([],true) }}"
 
       - if:
-          - "{{ queue_idx > queue|length }}"
-        then:
-          - event: sprinkler_set_status_message
-            event_data:
-              message: Completed
-        else:
+          - "{{ queue|length > 0 }}"
 
+        then:
           - action: timer.start
             target:
               entity_id: timer.sprinkler_valve_time
             data:
-              duration: "{{ 60 * queue[queue_idx-1][1] }}"
+              duration: "{{ 60 * queue[0][1] }}"
+
 
 
 
@@ -283,11 +248,6 @@ automation:
           entity_id: timer.sprinkler_valve_time
 
     actions:
-      - variables:
-          queue: "{{ state_attr('sensor.sprinkler_queue', 'queue' ) }}"
-          queue_idx: "{{ states('input_number.sprinkler_current_queue_position' )|int(1) }}"
-          cur_valve_entity: "{{ queue[queue_idx-1][0] }}"
-          next_valve: "{{ [] if queue_idx == queue|length else queue[queue_idx] }}"
 
       # Block running any valves when the master switch is off.
       # Could this just be a simple condition?
@@ -305,17 +265,33 @@ automation:
           - stop: End
 
 
+      - variables:
+          queue: "{{ state_attr('sensor.sprinkler_queue', 'queue' )|default([],true)  }}"
 
-      - action: homeassistant.turn_on
-        target:
-          entity_id: "{{ cur_valve_entity }}"
+      - if:
+          - "{{ queue|length == 0 }}"
+        then:
+          - event: sprinkler_set_status_message
+            event_data:
+              message: "Timer Started but no sprinklers to run."
+              title: Alerta
 
-      - event: sprinkler_set_status_message
-        event_data:
-          title: Running
-          message:  "{{ entity_name(cur_valve_entity) }}"
-          next: "{{ entity_name(next_valve[0]) if next_valve|length else '' }}"
-          prog: "{{ state_attr('sensor.sprinkler_queue','prog') if queue|length > 1 else '' }}"
+        else:
+          - action: homeassistant.turn_on
+            target:
+              entity_id: "{{ queue[0][0] }}"
+
+
+          - event: sprinkler_set_status_message
+            event_data:
+              title: Running
+              message:  "{{ entity_name( queue[0][0] ) }}"
+              next: "{{ entity_name( queue[1][0] ) if queue|length > 1 else '' }}"
+
+              # Not really true -- fix this in the sprinkler_queue
+              prog: "{{ state_attr('sensor.sprinkler_queue','prog') if queue|length > 1 else '' }}"
+
+
 
   # --------------- Timer Stopped/Paused  --------------
   - alias: "Sprinkler Run: Timer Stopped or Paused"
@@ -332,16 +308,14 @@ automation:
 
     actions:
       - variables:
-          queue: "{{ state_attr('sensor.sprinkler_queue', 'queue' ) }}"
-          queue_idx: "{{ states('input_number.sprinkler_current_queue_position' )|int(1) }}"
-          cur_valve_entity: "{{ queue[queue_idx-1][0] }}"
-          next_valve: "{{ [] if queue_idx == queue|length else queue[queue_idx] }}"
+          queue: "{{ state_attr('sensor.sprinkler_queue', 'queue' )|default([],true)  }}"
           event_type: "{{ trigger.event.event_type }}"
 
-
+      # Don't really need to do this when != paused, because the queue will turn off the item as it is removed from queue.
+      # The queue does that to prevent zombie switches if the queue is somehow manually changed.
       - action: homeassistant.turn_off
         target:
-          entity_id: "{{ cur_valve_entity }}"
+          entity_id: "{{ queue[0][0] }}"
 
       # Add a wait_on_state here and a warning?
 
@@ -353,36 +327,32 @@ automation:
                 event_data:
                   title: Paused until
                   message: "{{ (now() + timedelta(minutes=10)).strftime( '%H:%M:%S') }}"
-                  next: "{{ entity_name(next_valve[0]) if next_valve|length else '' }}"
+                  next: "{{ entity_name( queue[1][0] ) if queue|length > 1 else '' }}"
                   prog: "{{ state_attr('sensor.sprinkler_queue','prog') if queue|length > 1 else '' }}"
+
 
           - conditions:
               - "{{ 'cancelled' in event_type }}"
+
             sequence:
-              # Set the position to the end
-              # But this will trigger a change and result in a "finished" message
-              # Maybe don't even need this?
-              - action: input_number.set_value
-                enabled: false
-                target:
-                  entity_id: input_number.sprinkler_current_queue_position
-                data:
-                  value: "{{ state_attr('sensor.sprinkler_queue', 'queue' ) | length }}"
+              - event: sprinkler_clear_queue
 
               - event: sprinkler_set_status_message
                 event_data:
                   message: Stopped
 
-          # Move to next valve
           - conditions:
               - "{{ 'finished' in event_type }}"
+
             sequence:
-              # This delay is to allow final counts of water used by the previous valve
-              - delay:
-                  seconds: 2
-              - action: input_number.increment
-                target:
-                  entity_id: input_number.sprinkler_current_queue_position
+              - event: sprinkler_pop_queue
+
+              - event: sprinkler_set_status_message
+                event_data:
+                  message: Finished
+
+
+
 
   # --------------- Master Switch Toggled --------------
   - alias: "Sprinkler Run: Master Switch Toggled"
@@ -416,14 +386,12 @@ automation:
 
     actions:
       - variables:
-          queue_idx: "{{ states('input_number.sprinkler_current_queue_position' )|int(0) }}"
           queue: "{{ state_attr('sensor.sprinkler_queue', 'queue' )|default([],true) }}"
 
       - if:
-          - "{{ queue_idx == 0 or queue_idx > queue|length }}"
+          - "{{ queue|length == 0 }}"
         then:
           - stop: "Sprinklers: HA Started but queue is empty or not running"
-
 
 
       - if:
@@ -436,7 +404,7 @@ automation:
 
         else:
           - variables:
-              cur_valve_entity: "{{ queue[queue_idx-1][0] }}"
+              cur_valve_entity: "{{ queue[0][0] }}"
               cur_valve_name: "{{ entity_name(cur_valve_entity) }}"
 
           - if:
@@ -450,11 +418,16 @@ automation:
                 target:
                   entity_id: "{{ cur_valve_entity }}"
 
+              # Pop the queue, and see if there's more to run
+              - event: sprinkler_pop_queue
+
               - event: sprinkler_set_status_message
                 event_data:
                   message: Shut off {{ cur_valve_name }} after HA restart..
 
-  # --------------- Check for zombie valve on HA restart --------------
+
+
+  # --------------- Check for Valve Paused Too Long--------------
   - alias: "Sprinkler Run: Paused Too Long"
     id: sprinkler_run_paused_too_long
     triggers:
