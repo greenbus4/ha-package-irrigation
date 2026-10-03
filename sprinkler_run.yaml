@@ -310,14 +310,24 @@ automation:
       - variables:
           queue: "{{ state_attr('sensor.sprinkler_queue', 'queue' )|default([],true)  }}"
           event_type: "{{ trigger.event.event_type }}"
+          cur_valve: "{{ queue[0][0] }}"
 
       # Don't really need to do this when != paused, because the queue will turn off the item as it is removed from queue.
       # The queue does that to prevent zombie switches if the queue is somehow manually changed.
       - action: homeassistant.turn_off
         target:
-          entity_id: "{{ queue[0][0] }}"
+          entity_id: "{{ cur_valve }}"
 
       # Add a wait_on_state here and a warning?
+      - wait_template: "{{ is_state(cur_valve,'off') }}"
+        timeout: 10
+      - if:
+          - "{{ not wait.completed }}"
+        then:
+          - action: persistent_notification.create
+            data:
+              title: Sprinkler Warning
+              message: 'Sprinkler valve {{ cur_valve }} failed to report off after 10 seconde.'
 
       - choose:
           - conditions:
