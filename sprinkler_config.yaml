@@ -25,6 +25,18 @@ template:
         event_type: event_template_reloaded
 
     variables:
+      #-----------------------------------------------------------------------
+      # I was going to say "Get rid of the valve names
+      # as the entites should have those names.  
+      # But, better is to remove this and use a table to manage in the UI
+      # (like HVAC or the Gate remotes).
+      # But then need to decide if we want to move to a model w/o programs
+      # where each valve just has a day frequency and each day an automation
+      # creates a queue of valves to run.
+      # But, then how do we manually run what used to be a program?
+      # The real solution would be to "tag" valves so can have best of both worlds.
+      #-----------------------------------------------------------------------
+
       programs:
         The Hose on the Hill:
           Left side of path up hill two sprinklers:

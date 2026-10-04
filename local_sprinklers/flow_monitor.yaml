@@ -35,7 +35,7 @@ automation:
           label_id: sprinkler_valve
         options:
           behavior: each
-          for: '00:15:00'
+          for: '00:10:00'
     actions:
       - action: script.turn_on
         target:

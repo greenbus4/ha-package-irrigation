@@ -241,26 +241,22 @@ automation:
   # -------------- Check for a valve on a long time ---------------
   - id: irrigation_valve_left_on
     alias: 'Alert: Irrigation Valve Left On'
-    mode: single
+    mode: queued
     triggers:
-      - trigger: state
-        entity_id:
-          - switch.any_sprinkler_valve_open
-        to: 'on'
-        for:
-          hours: 2
-          minutes: 0
-          seconds: 0
-    conditions: []
+      - trigger: switch.turned_on
+        target:
+          label_id: sprinkler_valve
+        options:
+          behavior: each
+          for: '02:00:00'
+
     actions:
       - action: script.notify_irrigation_problem
-        metadata: {}
         data:
-          message: >
-            Sprinkler Stuck? Check if {{
-            expand('switch.any_sprinkler_valve_open')|selectattr('state','eq',
-            'on')|map(attribute='name')|list|join("\n") }} should still be
-            running.
+          message: |-
+            Sprinkler Stuck? 
+            "{{ entity_name( trigger.entity_id ) }}" has been running for
+            {{ time_since(trigger.to_state.last_changed|as_datetime) }}
 
 
   # ------- Check for high water usage ------------------------
