@@ -1,0 +1,170 @@
+# vim: set filetype=yaml :
+# Requires vim.o.modeline = true in ~/.config/nvim/init.lua
+
+
+template:
+
+  # This holds <entity_id>:<current_gals> when a valve turns on.
+  # Note that templates run in "single", so it's possible that last doesn't win.
+  # remember below that current_gals could be unknown.
+  - triggers:
+    - trigger: switch.turned_on
+      target:
+        label_id: sprinkler_valve
+      options:
+        behavior: each
+    sensor:
+      name: "Last Sprinkler Start Gals"
+      default_entity_id: sensor.sprinkler_last_start_gals
+      unique_id: sprinkler_last_start_gals_id
+      state: "{{ [trigger.entity_id, states('sensor.irrigation_water_monitor_total')]|join(':') }}"
+
+
+#-----------------------------------------------------------------------------
+
+automation:
+
+  # Run script when any valve has been on for enought time to find average flow rate.
+  - id: alert_on_change_in_flow_rate
+    alias: 'Irrigation-Monitor: Report unexpected flow rate.' 
+    mode: queued
+    triggers:
+      # Trigger when any sprinkler valve has been on for 15 minutes
+      - trigger: switch.turned_on
+        target:
+          label_id: sprinkler_valve
+        options:
+          behavior: each
+          for: '00:15:00'
+    actions:
+      - action: script.turn_on
+        target:
+          entity_id: script.sprinkler_report_unexpected_flow
+        data:
+          variables:
+            valve: "{{ trigger.entity_id }}"
+
+#-----------------------------------------------------------------------------
+
+script:
+  sprinkler_report_unexpected_flow:
+    alias: Sprinkler Report Unexpected Flow
+    mode: queued
+    fields:
+      valve:
+        name: Sprinkler Valve
+        description: Compares the flow rate to the configured flow value for the passed in valve.
+        required: true
+        example: switch.sprinkler_valve_15
+        selector:
+          text:
+
+    sequence:
+      - if:
+          - "{{ not has_value('sensor.irrigation_water_monitor_flow') }}"
+        then:
+          - action: persistent_notification.create
+            metadata: {}
+            data:
+              title: Irrigation Issue
+              message: |-
+                Could not check valve flow rate for valve {{ valve }} because
+                it appears the irrigation sensors are not avilable.
+                Flow={{ states('sensor.irrigation_water_monitor_flow') }}
+                Gals={{ states('sensor.irrigation_water_monitor_total') }}
+          - stop: End.
+
+
+      - variables:
+          # These are the expected (measured) rates in gal/minute
+          flow_rate:
+            switch.sprinkler_valve_01: 0.28
+            switch.sprinkler_valve_02: 0
+            switch.sprinkler_valve_03: 3.81
+            switch.sprinkler_valve_04: 0
+            switch.sprinkler_valve_05: 0
+            switch.sprinkler_valve_06: 0
+            switch.sprinkler_valve_07: 1.45
+            switch.sprinkler_valve_08: 2.25
+            switch.sprinkler_valve_09: 0
+            switch.sprinkler_valve_10: 0
+            switch.sprinkler_valve_11: 0
+            switch.sprinkler_valve_12: 0
+            switch.sprinkler_valve_13: 0
+            switch.sprinkler_valve_14: 0
+            switch.sprinkler_valve_15: 0
+            switch.sprinkler_valve_16: 0
+            switch.sprinkler_valve_17: 11.65
+            switch.sprinkler_valve_18: 4.16
+            switch.sprinkler_valve_19: 2.35
+            switch.sprinkler_valve_20: 1.13
+            switch.sprinkler_valve_21: 1.49
+            switch.sprinkler_valve_22: 0
+            switch.sprinkler_valve_23: 0
+            switch.sprinkler_valve_24: 1.84
+            switch.sprinkler_valve_25: 8.48
+            switch.sprinkler_valve_26: 8.91
+            switch.sprinkler_valve_27: 4.09
+
+          # Configured (above) rate for each valve
+          expected_rate: "{{ flow_rate[valve]|float if valve in flow_rate else 0.0 }}"
+
+          # Starting valve and gallons set in template above.
+          start_info: "{{ (states('sensor.sprinkler_last_start_gals')|default('nope:0.0')).split(':') }}"
+
+          # Stuff for calculations
+          start_valve: "{{ start_info[0] }}"
+          start_gals: "{{ start_info[1]|float(0.0) }}"
+          cur_gals: "{{ states('sensor.irrigation_water_monitor_total')|float(0.0) }}"
+          start_sec: "{{ states.sensor.sprinkler_last_start_gals.last_changed|as_timestamp|int }}"
+          now_sec: "{{ now()|as_timestamp|int }}"
+
+
+          current_rate: >-
+            {{
+              60 * (cur_gals - start_gals)/(now_sec - start_sec) if valve == start_valve
+              else states('sensor.irrigation_water_monitor_flow')|float(0.0)
+            }}
+
+          flow_difference: '{{ current_rate - expected_rate }}'
+          delta: >
+            {{
+              (100 * flow_difference / expected_rate)|round(1) ~ '%' if expected_rate > 0 
+              else 'expected zero rate'
+            }}
+
+          friendly_name: "{{ entity_name( valve )}}"
+          percent_limit: 15
+
+          # How much + or - to look at, because many of the expected values are zero 
+          # but still want to catch when using water but expects no flow.
+          range_limit: '{{ expected_rate|float * (percent_limit/100) }}'
+          flow_fmt: '%.2f g/m'
+
+
+      - if:
+          - condition: template
+            value_template: '{{ flow_difference|abs > range_limit }}'
+        then:
+          - action: persistent_notification.create
+            data:
+              title: Irrigation Issue
+              message: >-
+                Flow for valve "{{ valve }}" ( {{ friendly_name }} ) is
+                currently at {{ flow_fmt % current_rate }} but expected {{
+                flow_fmt % expected_rate }} g/m which is off by {{ flow_fmt %
+                flow_difference }} and that exceeds the allowable 
+                {{ percent_limit }}% difference.
+                Delta={{ delta }}
+
+
+
+      - alias: Finally, write a log entry of the current flow for the valve.
+        action: notify.send_message
+        metadata: {}
+        data:
+          message: 'Water Usage:        {{ valve }}: {{ flow_fmt % current_rate }}'
+        target:
+          entity_id: notify.sprinkler_log
+
+

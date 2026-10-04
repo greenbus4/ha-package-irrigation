@@ -137,6 +137,7 @@ automation:
       There's a delay of 15s when a valve is turned off to catch the last
       update from the meter sensor (also updates ever 15s).
       (Note: the valves are configured to have a 30s delay between them)
+      UPDATE: 10/3/26 -- not sure there's still a delay...
 
       Set max high to suppress "Set tariff valve for irrigation: Maximum number
       of runs exceeded" but the problem is this is called at startup for all
@@ -144,49 +145,24 @@ automation:
       Maybe just look at from [on,off] to the same.
 
     triggers:
-      - entity_id:
-          - switch.sprinkler_valve_01
-          - switch.sprinkler_valve_02
-          - switch.sprinkler_valve_03
-          - switch.sprinkler_valve_04
-          - switch.sprinkler_valve_05
-          - switch.sprinkler_valve_06
-          - switch.sprinkler_valve_07
-          - switch.sprinkler_valve_08
-          - switch.sprinkler_valve_09
-          - switch.sprinkler_valve_10
-          - switch.sprinkler_valve_11
-          - switch.sprinkler_valve_12
-          - switch.sprinkler_valve_13
-          - switch.sprinkler_valve_14
-          - switch.sprinkler_valve_15
-          - switch.sprinkler_valve_16
-          - switch.sprinkler_valve_17
-          - switch.sprinkler_valve_18
-          - switch.sprinkler_valve_19
-          - switch.sprinkler_valve_20
-          - switch.sprinkler_valve_21
-          - switch.sprinkler_valve_22
-          - switch.sprinkler_valve_23
-          - switch.sprinkler_valve_24
-          - switch.sprinkler_valve_25
-          - switch.sprinkler_valve_26
-          - switch.sprinkler_valve_27
-        trigger: state
-        to:
-          - "on"
-          - "off"
+      # Need a better way to do this.
+      - trigger: switch.turned_off
+        target:
+          label_id: sprinkler_valve
+        options:
+          behavior: each
+
+      - trigger: switch.turned_on
+        target:
+          label_id: sprinkler_valve
+        options:
+          behavior: each
+
     actions:
-      - alias: Determine which tariff to set
+      - alias: Determine which tariff to set (assume it's "hose" when a valve is turned off)
         variables:
-          new_tariff: |-
-            {% if is_state( trigger.entity_id, 'off' ) %}
-              hose
-            {% elif is_state( trigger.entity_id, 'on' ) %}
-              {{ trigger.entity_id.replace( 'switch.sprinkler_', '' ) }}
-            {% else %}
-              none
-            {% endif %}
+          new_tariff: "{{ 'hose' if trigger.to_state.state == 'off' else trigger.entity_id.replace( 'switch.sprinkler_', '' ) }}"
+
       - alias: >-
           There is a little flow after the valve turns off, so wait a short
           amount of time before updating the teriff name so that the flow is
@@ -195,34 +171,16 @@ automation:
           - condition: template
             value_template: "{{ is_state( trigger.entity_id, 'off' ) }}"
         then:
-          - delay:
-              hours: 0
-              minutes: 0
-              seconds: 2
-              milliseconds: 0
-      - alias: Set the tariff on the meters.
-        if:
-          - condition: template
-            value_template: "{{ is_state( trigger.entity_id, ['on','off'] ) }}"
-        then:
-          - action: select.select_option
-            target:
-              entity_id:
-                - select.monthly_irrigation
-                - select.daily_irrigation
-            data:
-              option: '{{ new_tariff }}'
-      - alias: Track the current starting gallons for use in another automation
-        if:
-          - condition: template
-            value_template: "{{ is_state( trigger.entity_id, ['on'] ) }}"
-        then:
-          - action: input_text.set_value
-            data:
-              value: >-
-                {{ new_tariff + ':' + states('sensor.irrigation_water_monitor_total') }}
-            target:
-              entity_id: input_text.irrigation_starting_gallons
+          - delay: 2
+
+      - action: select.select_option
+        target:
+          entity_id:
+            - select.monthly_irrigation
+            - select.daily_irrigation
+        data:
+          option: '{{ new_tariff }}'
+
       - alias: Finally, write a log of which tariff is set.
         action: notify.send_message
         data:
@@ -459,154 +417,6 @@ automation:
             {{ currently_on }}.
 
 
-
-  # ------------------ Look for unexpected flow per-valve -----------------
-  # Initially set these in customize.yaml. Would be nice to be able to set attributes
-  # on the switches from the UI.
-  # The TODO here is to move all this into a "meta" sensor that stores this (and default runtime and schedule)
-  # as attribures.
-
-  - id: monitor_irrigation_flow_per_valve_id
-    alias: Monitor Irrigation Flow per Valve
-    mode: queued
-    triggers:
-      - trigger: state
-        entity_id:
-          - switch.sprinkler_valve_01
-          - switch.sprinkler_valve_02
-          - switch.sprinkler_valve_03
-          - switch.sprinkler_valve_04
-          - switch.sprinkler_valve_05
-          - switch.sprinkler_valve_06
-          - switch.sprinkler_valve_07
-          - switch.sprinkler_valve_08
-          - switch.sprinkler_valve_09
-          - switch.sprinkler_valve_10
-          - switch.sprinkler_valve_11
-          - switch.sprinkler_valve_12
-          - switch.sprinkler_valve_13
-          - switch.sprinkler_valve_14
-          - switch.sprinkler_valve_15
-          - switch.sprinkler_valve_16
-          - switch.sprinkler_valve_17
-          - switch.sprinkler_valve_18
-          - switch.sprinkler_valve_19
-          - switch.sprinkler_valve_20
-          - switch.sprinkler_valve_21
-          - switch.sprinkler_valve_22
-          - switch.sprinkler_valve_23
-          - switch.sprinkler_valve_24
-          - switch.sprinkler_valve_25
-          - switch.sprinkler_valve_26
-          - switch.sprinkler_valve_27
-        to: 'on'
-        for:
-          hours: 0
-          minutes: 15
-          seconds: 0
-    conditions: []
-    actions:
-      - variables:
-          flow_rate:
-            switch.sprinkler_valve_01: 0.28
-            switch.sprinkler_valve_02: 0
-            switch.sprinkler_valve_03: 3.81
-            switch.sprinkler_valve_04: 0
-            switch.sprinkler_valve_05: 0
-            switch.sprinkler_valve_06: 0
-            switch.sprinkler_valve_07: 1.45
-            switch.sprinkler_valve_08: 2.25
-            switch.sprinkler_valve_09: 0
-            switch.sprinkler_valve_10: 0
-            switch.sprinkler_valve_11: 0
-            switch.sprinkler_valve_12: 0
-            switch.sprinkler_valve_13: 0
-            switch.sprinkler_valve_14: 0
-            switch.sprinkler_valve_15: 0
-            switch.sprinkler_valve_16: 0
-            switch.sprinkler_valve_17: 11.65
-            switch.sprinkler_valve_18: 4.16
-            switch.sprinkler_valve_19: 2.35
-            switch.sprinkler_valve_20: 1.13
-            switch.sprinkler_valve_21: 1.49
-            switch.sprinkler_valve_22: 0
-            switch.sprinkler_valve_23: 0
-            switch.sprinkler_valve_24: 1.84
-            switch.sprinkler_valve_25: 8.48
-            switch.sprinkler_valve_26: 8.91
-            switch.sprinkler_valve_27: 4.09
-
-          valve: '{{ trigger.entity_id }}'
-          expected_rate: '{{ flow_rate[valve] if valve in flow_rate else 0 }}'
-
-          current_flow: >-
-            {%- set start_value = states('input_text.irrigation_starting_gallons' ) %}
-
-            # Check if the current valve matches the valve saved in the "start_value" which looks like "valve_24:112457.53125"
-            # and then calculate the average over the time
-            #
-            {%- if valve[17:]+':' in start_value %}
-              {%- set v,g = start_value.split(':') %}
-              {%- set gals_used = states('sensor.irrigation_water_monitor_total')|float - g|float %}
-              {%- set total_secs = (now() - states.input_text.irrigation_starting_gallons.last_changed).total_seconds() %}
-              {{ gals_used/total_secs*60 }}
-
-            # Else, the valve didn't match so use the current flow rate reported by the water meter
-            {%- else -%}
-              {{ states('sensor.irrigation_water_monitor_flow' ) }}
-            {%- endif %}
-
-          flow_difference: '{{ current_flow|float - expected_rate|float }}'
-          friendly_name: "{{ entity_name( valve )}}"
-          percent_limit: 15
-
-          # How much + or - to look at
-          range_limit: '{{ expected_rate|float * (percent_limit/100) }}'
-          flow_fmt: '%.2f g/m'
-
-      # This just warns me if the current valve is not the expected valve.
-      - if:
-          - condition: template
-            value_template: >-
-              {{ not valve[17:]+':' in states('input_text.irrigation_starting_gallons' ) }}
-        then:
-          - action: persistent_notification.create
-            data:
-              message: >-
-                Warning: Expected to find {{ valve }} in
-                input_text.irrigation_starting_gallons
-
-                but instead found "{{
-                states('input_text.irrigation_starting_gallons' ) }}".
-
-                Will use the current flow of {{ flow_fmt % current_flow }}.
-
-
-      - if:
-          - condition: template
-            value_template: '{{ flow_difference|abs > range_limit }}'
-        then:
-          - alias: Notify pump turned off prematurely
-            action: persistent_notification.create
-            metadata: {}
-            data:
-              title: Irrigation Issue
-              message: >-
-                Flow for valve "{{ valve }}" ( {{ friendly_name }} ) is
-                currently at {{ flow_fmt % current_flow }} but expected {{
-                flow_fmt % expected_rate }} g/m which is off by {{ flow_fmt %
-                flow_difference }} and that exceeds the allowable {{
-                percent_limit }}% difference.
-
-                Maybe update the [Automation](/config/automation/edit/{{
-                this.attributes.id }}) to {{ flow_fmt % current_flow }}.
-      - alias: Finally, write a log entry of the current flow for the valve.
-        action: notify.send_message
-        metadata: {}
-        data:
-          message: 'Water Usage:        {{ valve }}: {{ flow_fmt % current_flow }}'
-        target:
-          entity_id: notify.sprinkler_log
 
 
 
